@@ -1,1 +1,4 @@
 Mỗi lần sử dụng, bạn cần kích hoạt venv bằng source venv/bin/activate trước khi chạy lệnh scrapy. Khi không cần nữa, gõ deactivate.
+Theme: Hope,Despair,Trust,Isolation,Rebellion,Danger,Love,Guilt
+Sub path: /Users/duongcongthuyet/Downloads/workspace/AI /project/data/Subtitles
+save path: /Users/duongcongthuyet/Downloads/workspace/AI /project/stubs/theme_classifier_output.csv
