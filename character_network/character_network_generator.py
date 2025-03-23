@@ -39,7 +39,7 @@ class CharacterNetworkGenerator():
             edge_attr='value',
             create_using=nx.Graph()
         )
-        net = Network(height="750px", width="1000px", notebook=True, bgcolor="#222222", font_color="white", cdn_resources="remote")
+        net = Network(height="700px", width="1000px", notebook=True, bgcolor="#222222", font_color="white", cdn_resources="remote")
         node_degree = dict(G.degree)
 
         nx.set_node_attributes(G, node_degree, 'size')
