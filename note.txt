@@ -3,7 +3,7 @@ Theme: Hope,Despair,Trust,Isolation,Rebellion,Danger,Love,Guilt
 Sub path: 
 save path: /Users/duongcongthuyet/Downloads/workspace/AI /project/stubs/theme_classifier_output.csv
 
-model path: christopherxzyx/location_classifier
+model path: christopherxzyx/locations_classifier
 text to classify:
 Text 1:
 "A hidden facility beneath Hawkins where Soviet scientists tried to rip open a portal to another dimension using strange machines."
