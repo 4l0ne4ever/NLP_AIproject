@@ -2,3 +2,21 @@ Mỗi lần sử dụng, bạn cần kích hoạt venv bằng source .venv/bin/a
 Theme: Hope,Despair,Trust,Isolation,Rebellion,Danger,Love,Guilt
 Sub path: 
 save path: /Users/duongcongthuyet/Downloads/workspace/AI /project/stubs/theme_classifier_output.csv
+
+model path: christopherxzyx/location_classifier
+text to classify:
+Text 1:
+"A hidden facility beneath Hawkins where Soviet scientists tried to rip open a portal to another dimension using strange machines."
+(Gợi ý: Có thể là Action Hub vì liên quan đến sự kiện lớn và thí nghiệm.)
+Text 2:
+"A cozy cabin in the woods near Hawkins where a family gathers to hide from the chaos and plan their next steps."
+(Gợi ý: Có thể là Safe Haven vì là nơi trú ẩn an toàn.)
+Text 3:
+"A twisted realm cloaked in fog and shadows, crawling with monstrous creatures that hunt anything that moves."
+(Gợi ý: Có thể là Danger Zone vì chứa mối đe dọa siêu nhiên.)
+Text 4:
+"A small diner on the edge of town where locals grab a quick bite, nothing unusual ever happens there."
+(Gợi ý: Có thể là Minor Location vì không có vai trò lớn.)
+Text 5:
+"An old warehouse in Lenora Hills where a fierce battle broke out between teenagers and a shadowy monster from another world."
+(Gợi ý: Có thể là Action Hub vì là nơi xảy ra chiến đấu.)
