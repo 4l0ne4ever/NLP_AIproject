@@ -74,6 +74,7 @@ class LocationClassifier():
             eval_strategy="epoch",
             logging_strategy="epoch",
             push_to_hub=True,
+            save_strategy="no",
         )
         trainer = CustomTrainer(
             model=model,
@@ -89,8 +90,6 @@ class LocationClassifier():
 
         trainer.train()
 
-        trainer.save_model(self.model_path)
-        self.tokenizer.save_pretrained(self.model_path)
         trainer.push_to_hub()
 
         # Clean up memory
