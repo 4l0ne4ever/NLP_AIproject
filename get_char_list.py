@@ -7,14 +7,16 @@ import os
 import sys
 import json
 import pathlib
-folder_path  = pathlib.Path().parent.resolve()
+
+folder_path = pathlib.Path().parent.resolve()
 sys.path.append(str(os.path.join(folder_path, '../')))
 from utils import load_subtitles_dataset
 
 class NamedEntityRecognizer:
-    def __init__(self):
+    def __init__(self, character_list_path='/Users/duongcongthuyet/Downloads/workspace/AI /project/data/list_characters.jsonl'):
         self.nlp_model = self.load_model()
-        pass
+        self.character_set = self.load_character_names(character_list_path)
+        # Removed unnecessary 'pass' statement
 
     def load_model(self):
         nlp = spacy.load("en_core_web_trf")
@@ -40,27 +42,25 @@ class NamedEntityRecognizer:
             return set()
         return character_names
     
-    def get_ners_inference(self,script):
+    def get_ners_inference(self, script):
         script_sentences = sent_tokenize(script)
         ner_output = []
-        # TODO: write func to check if the character is in the list
         for sentence in script_sentences:
             doc = self.nlp_model(sentence)
             ners = set()
             for entity in doc.ents:
                 if entity.label_ == "PERSON":
-                    full_name = entity.text
-                    first_name = full_name.split(" ")[0]
-                    first_name = first_name.strip()
+                    full_name = entity.text.strip()
+                    first_name = full_name.split()[0].strip()
                     if full_name in self.character_set or first_name in self.character_set:
                         ners.add(first_name)
-                ner_output.append(ners)
+            ner_output.append(ners)
         return ner_output
     
-    def get_ners(self, dataset_path,save_path=None):
+    def get_ners(self, dataset_path, save_path=None):
         if save_path is not None and os.path.exists(save_path):
             df = pd.read_csv(save_path)
-            df["ners"] = df["ners"].apply(lambda x: literal_eval(x) if isinstance(x,str) else x)
+            df["ners"] = df["ners"].apply(lambda x: literal_eval(x) if isinstance(x, str) else x)
             return df
             
         # Load the dataset

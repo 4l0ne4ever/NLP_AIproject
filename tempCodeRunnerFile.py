@@ -1,2 +1,0 @@
-
-            with gr.Column():
