@@ -13,7 +13,10 @@ sys.path.append(str(os.path.join(folder_path, '../')))
 from utils import load_subtitles_dataset
 
 class NamedEntityRecognizer:
+    # For google colab
     CHARACTER_FILE_PATH = "/content/list_characters.jsonl" 
+    # For local
+    # CHARACTER_FILE_PATH = "/Users/duongcongthuyet/Downloads/workspace/AI /project/data/list_characters.jsonl"
 
     def __init__(self):
         self.nlp_model = self.load_model()
