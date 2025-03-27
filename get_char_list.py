@@ -1,72 +1,54 @@
-import spacy
 import pandas as pd
-import nltk
-from nltk.tokenize import sent_tokenize
-from ast import literal_eval
-import os
-import sys
-import json
-import pathlib
+import matplotlib.pyplot as plt
+import networkx as nx
+from pyvis.network import Network
 
-folder_path = pathlib.Path().parent.resolve()
-sys.path.append(str(os.path.join(folder_path, '../')))
-from utils import load_subtitles_dataset
+class CharacterNetworkGenerator():
+    def __init__(self):
+        pass
+    
+    def generate_character_network(self,df):
+        windows = 10
+        entity_relationship = []
+        for row in df['ners']:
+            previous_entities_in_window = []
+            for sentence in row:
+                previous_entities_in_window.append(list(sentence))
+                previous_entities_in_window = previous_entities_in_window[-windows:]
+                previous_entities_flattened = sum(previous_entities_in_window, [])
+                for entity in sentence:
+                    for entity_in_windows in previous_entities_flattened:
+                        if entity != entity_in_windows:
+                            entity_relationship.append(sorted([entity, entity_in_windows]))
 
-class NamedEntityRecognizer:
-    def __init__(self, character_list_path='/Users/duongcongthuyet/Downloads/workspace/AI /project/data/list_characters.jsonl'):
-        self.nlp_model = self.load_model()
-        self.character_set = self.load_character_names(character_list_path)
-        # Removed unnecessary 'pass' statement
+        relationship_df = pd.DataFrame({'value': entity_relationship})
+        relationship_df['source'] = relationship_df['value'].apply(lambda x: x[0])
+        relationship_df['target'] = relationship_df['value'].apply(lambda x: x[1])
+        relationship_df = relationship_df.groupby(['source', 'target']).count().reset_index()
+        relationship_df = relationship_df.sort_values('value', ascending=False)
+        return relationship_df  
+    
+    def draw_network_graph(self, relationship_df):
+        relationship_df = relationship_df.sort_values('value', ascending=False)
+        
+        G = nx.from_pandas_edgelist(
+            relationship_df,
+            source='source',
+            target='target',
+            edge_attr='value',
+            create_using=nx.Graph()
+        )
+        net = Network(height="700px", width="1200px", notebook=True, bgcolor="#222222", font_color="white", cdn_resources="remote")
+        node_degree = dict(G.degree)
 
-    def load_model(self):
-        nlp = spacy.load("en_core_web_trf")
-        return nlp
-    
-    def load_character_names(self, filepath):
-        character_names = set()
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                for line in f:
-                    data = json.loads(line.strip())
-                    name = data.get('character_name', '').strip()
-                    if name:
-                        # Add both full name and first name to the set
-                        character_names.add(name)
-                        first_name = name.split()[0]
-                        character_names.add(first_name)
-        except FileNotFoundError:
-            print(f"Error: Character list file '{filepath}' not found.")
-            return set()
-        except json.JSONDecodeError as e:
-            print(f"Error decoding JSON in '{filepath}': {e}")
-            return set()
-        return character_names
-    
-    def get_ners_inference(self, script):
-        script_sentences = sent_tokenize(script)
-        ner_output = []
-        for sentence in script_sentences:
-            doc = self.nlp_model(sentence)
-            ners = set()
-            for entity in doc.ents:
-                if entity.label_ == "PERSON":
-                    full_name = entity.text.strip()
-                    first_name = full_name.split()[0].strip()
-                    if full_name in self.character_set or first_name in self.character_set:
-                        ners.add(first_name)
-            ner_output.append(ners)
-        return ner_output
-    
-    def get_ners(self, dataset_path, save_path=None):
-        if save_path is not None and os.path.exists(save_path):
-            df = pd.read_csv(save_path)
-            df["ners"] = df["ners"].apply(lambda x: literal_eval(x) if isinstance(x, str) else x)
-            return df
-            
-        # Load the dataset
-        df = load_subtitles_dataset(dataset_path)
-        # Run inference 
-        df["ners"] = df["script"].apply(self.get_ners_inference)
-        if save_path is not None:
-            df.to_csv(save_path, index=False)
-        return df
+        nx.set_node_attributes(G, node_degree, 'size')
+        net.from_nx(G)
+        html = net.generate_html()
+        html = html.replace("'","\"")
+        
+        output_html = f"""<iframe style="width: 100%; height: 600px;margin:0 auto" name="result" allow="midi; geolocation; microphone; camera;
+        display-capture; encrypted-media;" sandbox="allow-modals allow-forms
+        allow-scripts allow-same-origin allow-popups
+        allow-top-navigation-by-user-activation allow-downloads" allowfullscreen=""
+        allowpaymentrequest="" frameborder="0" srcdoc='{html}'></iframe>"""
+        return output_html

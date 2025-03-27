@@ -7,18 +7,24 @@ import os
 import sys
 import json
 import pathlib
-folder_path  = pathlib.Path().parent.resolve()
+
+folder_path = pathlib.Path().parent.resolve()
 sys.path.append(str(os.path.join(folder_path, '../')))
 from utils import load_subtitles_dataset
 
 class NamedEntityRecognizer:
+    CHARACTER_FILE_PATH = "/content/list_characters.jsonl" 
+
     def __init__(self):
         self.nlp_model = self.load_model()
-        pass
+        self.character_set = self.load_character_names(self.CHARACTER_FILE_PATH)
 
     def load_model(self):
-        nlp = spacy.load("en_core_web_trf")
-        return nlp
+        try:
+            nlp = spacy.load("en_core_web_trf")
+            return nlp
+        except Exception as e:
+            raise Exception(f"Error loading spaCy model: {str(e)}")
     
     def load_character_names(self, filepath):
         character_names = set()
@@ -28,10 +34,10 @@ class NamedEntityRecognizer:
                     data = json.loads(line.strip())
                     name = data.get('character_name', '').strip()
                     if name:
-                        # Add both full name and first name to the set
                         character_names.add(name)
                         first_name = name.split()[0]
                         character_names.add(first_name)
+            print(f"Loaded {len(character_names)} character names from {filepath}")
         except FileNotFoundError:
             print(f"Error: Character list file '{filepath}' not found.")
             return set()
@@ -40,33 +46,35 @@ class NamedEntityRecognizer:
             return set()
         return character_names
     
-    def get_ners_inference(self,script):
-        script_sentences = sent_tokenize(script)
-        ner_output = []
-        # TODO: write func to check if the character is in the list
-        for sentence in script_sentences:
-            doc = self.nlp_model(sentence)
-            ners = set()
-            for entity in doc.ents:
-                if entity.label_ == "PERSON":
-                    full_name = entity.text
-                    first_name = full_name.split(" ")[0]
-                    first_name = first_name.strip()
-                    if full_name in self.character_set or first_name in self.character_set:
-                        ners.add(first_name)
+    def get_ners_inference(self, script):
+        try:
+            script_sentences = sent_tokenize(script)
+            ner_output = []
+            for sentence in script_sentences:
+                doc = self.nlp_model(sentence)
+                ners = set()
+                for entity in doc.ents:
+                    if entity.label_ == "PERSON":
+                        full_name = entity.text
+                        first_name = full_name.split(" ")[0].strip()
+                        if full_name in self.character_set or first_name in self.character_set:
+                            ners.add(first_name)
                 ner_output.append(ners)
-        return ner_output
+            return ner_output
+        except Exception as e:
+            raise Exception(f"Error in NER inference: {str(e)}")
     
-    def get_ners(self, dataset_path,save_path=None):
-        if save_path is not None and os.path.exists(save_path):
-            df = pd.read_csv(save_path)
-            df["ners"] = df["ners"].apply(lambda x: literal_eval(x) if isinstance(x,str) else x)
-            return df
+    def get_ners(self, dataset_path, save_path=None):
+        try:
+            if save_path is not None and os.path.exists(save_path):
+                df = pd.read_csv(save_path)
+                df["ners"] = df["ners"].apply(lambda x: literal_eval(x) if isinstance(x, str) else x)
+                return df
             
-        # Load the dataset
-        df = load_subtitles_dataset(dataset_path)
-        # Run inference 
-        df["ners"] = df["script"].apply(self.get_ners_inference)
-        if save_path is not None:
-            df.to_csv(save_path, index=False)
-        return df
+            df = load_subtitles_dataset(dataset_path)
+            df["ners"] = df["script"].apply(self.get_ners_inference)
+            if save_path is not None:
+                df.to_csv(save_path, index=False)
+            return df
+        except Exception as e:
+            raise Exception(f"Error processing dataset: {str(e)}")
