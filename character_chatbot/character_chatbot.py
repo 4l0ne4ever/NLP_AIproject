@@ -142,7 +142,6 @@ class CharacterChatbot():
             model=model,
             train_dataset=dataset,
             peft_config=peft_config,
-            max_seq_length=max_seq_length,
             tokenizer=toknizer,
             args=training_args,
         )
