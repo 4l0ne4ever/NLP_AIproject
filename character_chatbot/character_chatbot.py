@@ -60,7 +60,7 @@ class CharacterChatbot():
         transcript_df['number_of_words'] = transcript_df['line'].str.strip().str.split(" ")
         transcript_df['number_of_words'] = transcript_df['number_of_words'].apply(lambda x: len(x))
         transcript_df['eleven_res'] = 0
-        transcript_df.loc[(transcript_df['name']=="Eleven")&(transcript_df['number_of_words']>=1),'eleven_res']=1
+        transcript_df.loc[(transcript_df['name']=="Eleven")&(transcript_df['number_of_words']>=2),'eleven_res']=1
         
         indexes_to_take = list(transcript_df[(transcript_df['eleven_res'] == 1)&(transcript_df.index>0)].index)
         system_prompt = """ You are Eleven (or El for short), a character from the Netflix series Stranger Things. Your responses should reflect her personality and speech patterns \n"""
