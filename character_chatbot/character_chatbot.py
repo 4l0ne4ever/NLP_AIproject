@@ -76,19 +76,19 @@ class CharacterChatbot():
         return dataset
     
     def train(self,
-              base_model_name_or_path,
-              dataset,
-              output_dir="./results",
-              per_device_train_batch_size=1,
-              gradient_accumulation_steps=1,
-              optimizer="paged_adamw_32bit",
-              save_steps=200,
-              logging_steps=10,
-              learning_rate=2e-4,
-              max_grad_norm=0.3,
-              max_steps=300,
-              warmup_ratio=0.3,
-              lr_scheduler_type="constant"):
+          base_model_name_or_path,
+          dataset,
+          output_dir="./results",
+          per_device_train_batch_size=1,
+          gradient_accumulation_steps=1,
+          optimizer="paged_adamw_32bit",
+          save_steps=200,
+          logging_steps=10,
+          learning_rate=2e-4,
+          max_grad_norm=0.3,
+          max_steps=300,
+          warmup_ratio=0.3,
+          lr_scheduler_type="constant"):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
@@ -102,6 +102,12 @@ class CharacterChatbot():
         model.config.use_cache = False
         toknizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
         toknizer.pad_token = toknizer.eos_token
+        
+        # Preprocess dataset
+        def preprocess_function(examples):
+            return toknizer(examples["prompt"], truncation=True, padding="max_length", max_length=512)
+        
+        dataset = dataset.map(preprocess_function, batched=True)
         
         # LoRA config
         lora_alpha = 16
@@ -136,7 +142,6 @@ class CharacterChatbot():
             model=model,
             train_dataset=dataset,
             peft_config=peft_config,
-            dataset_text_field="prompt",
             max_seq_length=512,
             tokenizer=toknizer,
             args=training_args,
@@ -171,7 +176,7 @@ class CharacterChatbot():
     def chat(self, message, history):
         messages = []
         #TODO: add system prompt
-        messages.append("""You are Eleven (or El for short), a character from the Netflix series Stranger Things. Your responses should reflect her personality and speech patterns \n""")
+        messages.append({"role":"system","content":"""You are Eleven (or El for short), a character from the Netflix series Stranger Things. Your responses should reflect her personality and speech patterns \n"""})
         
         for message_and_response in history:
             messages.append({
