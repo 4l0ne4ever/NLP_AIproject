@@ -4,6 +4,7 @@ from theme_classifier import ThemeClassifier
 from character_network import NamedEntityRecognizer
 from character_network import CharacterNetworkGenerator
 from text_classification import LocationClassifier
+from character_chatbot import CharacterChatbot
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -53,9 +54,19 @@ def classify_text(text_classification_model, text_classification_data_path, text
         return output
     except Exception as e:
         return f"Error: {str(e)}"
+
+def chat_with_character(message, history):
+    character_chatbot = CharacterChatbot(
+        "christopherxzyx/StrangerThings_Llama-3-8B",
+        huggingface_token=os.getenv('huggingface_token'),
+    )
+    output = character_chatbot.chat(message,history)
+    output = output['content'].strip()
+    return output
     
 def main():
     with gr.Blocks() as interface:
+        # Theme Classification (Zero Shot Classifiers)
         with gr.Row():
             with gr.Column():
                 gr.HTML("<h1>Theme Classification (Zero Shot Classifiers)</h1>")
@@ -68,6 +79,7 @@ def main():
                         save_path = gr.Textbox(label="Save path")
                         get_themes_button = gr.Button("Get Themes")
                         get_themes_button.click(get_themes, inputs=[theme_list, subtitles_path, save_path], outputs=[plot])
+        # Character Network (NERs and Graphs)
         with gr.Row():
             with gr.Column():
                 gr.HTML("<h1>Character Network (NERs and Graphs)</h1>")
@@ -80,6 +92,7 @@ def main():
                         ner_path = gr.Textbox(label="NERs save path")
                         get_network_graph_button = gr.Button("Get Network")
                         get_network_graph_button.click(get_character_network, inputs=[subtitles_path, ner_path], outputs=[network_html, status])
+        # Text Classification (LLMs)
         with gr.Row():
             with gr.Column():
                 gr.HTML("<h1>Text Classification (LLMs)</h1>")
@@ -92,6 +105,13 @@ def main():
                         text_to_classify = gr.Textbox(label="Text to classify")
                         classify_text_button = gr.Button("Classify Text (Location)")
                         classify_text_button.click(classify_text, inputs=[text_classification_model, text_classification_data_path, text_to_classify], outputs=[text_classification_output])
+                        
+        # Character Chatbot (LLMs)
+        with gr.Row():
+            with gr.Column():
+                gr.HTML("<h1>Character Chatbot (LLMs)</h1>")
+                gr.ChatInterface(chat_with_character)
+                
     interface.launch(share=True, debug=True)  # Bật debug để xem log
 
 if __name__ == "__main__":
