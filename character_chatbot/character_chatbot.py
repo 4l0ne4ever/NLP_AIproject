@@ -137,12 +137,12 @@ class CharacterChatbot():
             lr_scheduler_type=lr_scheduler_type,
             report_to="none",
         )
-        
+        max_seq_length = 512
         trainer = SFTTrainer(
             model=model,
             train_dataset=dataset,
             peft_config=peft_config,
-            max_seq_length=512,
+            max_seq_length=max_seq_length,
             tokenizer=toknizer,
             args=training_args,
         )
