@@ -100,7 +100,7 @@ class CharacterChatbot():
             trust_remote_code=True,
         )
         model.config.use_cache = False
-        toknizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
+        toknizer = AutoTokenizer.from_pretrained(base_model_name_or_path)  # Kept typo
         toknizer.pad_token = toknizer.eos_token
         
         # Preprocess dataset
@@ -137,19 +137,18 @@ class CharacterChatbot():
             lr_scheduler_type=lr_scheduler_type,
             report_to="none",
         )
-        max_seq_length = 512
+        
         trainer = SFTTrainer(
             model=model,
             train_dataset=dataset,
             peft_config=peft_config,
-            tokenizer=toknizer,
             args=training_args,
         )
         trainer.train()
         
         # Save model
         trainer.model.save_pretrained("final_ckpt")
-        toknizer.save_pretrained("final_ckpt")
+        toknizer.save_pretrained("final_ckpt")  # Kept typo
         
         # Flush memory
         del model, trainer
@@ -163,10 +162,10 @@ class CharacterChatbot():
             device_map=self.device,
         )
         
-        tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
+        toknizer = AutoTokenizer.from_pretrained(base_model_name_or_path)  # Kept typo
         model = PeftModel.from_pretrained(base_model, "final_ckpt")
         model.push_to_hub(self.model_path)
-        tokenizer.push_to_hub(self.model_path)
+        toknizer.push_to_hub(self.model_path)  # Kept typo
         
         # Flush memory
         del model, base_model
