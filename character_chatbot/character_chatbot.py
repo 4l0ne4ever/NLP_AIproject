@@ -3,7 +3,7 @@ import gc
 import huggingface_hub
 import pandas as pd
 from datasets import Dataset
-from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer
+from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 from peft import LoraConfig, PeftModel
 from trl import SFTConfig, SFTTrainer
 import transformers
@@ -78,20 +78,19 @@ class CharacterChatbot():
     def train(self,
               base_model_name_or_path,
               dataset,
-              output_dir = "./results",
-              per_device_train_batch_size = 1,
-              gradient_accumulation_steps = 1,
-              optimizer = "paged_adamw_32bit",
-              save_steps = 200,
-              logging_steps = 10,
-              learning_rate = 2e-4,
-              max_grad_norm = 0.3,
-              max_steps = 300,
-              warmup_ratio = 0.3,
-              lr_scheduler_type = "constant",
-              ):
+              output_dir="./results",
+              per_device_train_batch_size=1,
+              gradient_accumulation_steps=1,
+              optimizer="paged_adamw_32bit",
+              save_steps=200,
+              logging_steps=10,
+              learning_rate=2e-4,
+              max_grad_norm=0.3,
+              max_steps=300,
+              warmup_ratio=0.3,
+              lr_scheduler_type="constant"):
         bnb_config = BitsAndBytesConfig(
-            load_in_4bit= True,
+            load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.float16
         )
@@ -101,15 +100,13 @@ class CharacterChatbot():
             trust_remote_code=True,
         )
         model.config.use_cache = False
-        toknizer = AutoTokenizer.from_pretrained(
-            base_model_name_or_path
-        )
+        toknizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
         toknizer.pad_token = toknizer.eos_token
-        # Lora config (have some weights on additional weights next to the model that is going to be trained and is going to enhance the model abilities instead of training full model)
+        
+        # LoRA config
         lora_alpha = 16
         lora_dropout = 0.1
-        lora_r=64
-        
+        lora_r = 64
         peft_config = LoraConfig(
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
@@ -117,7 +114,8 @@ class CharacterChatbot():
             bias="none",
             task_type="CAUSAL_LM",
         )
-        training_args = SFTConfig(
+        
+        training_args = TrainingArguments(
             output_dir=output_dir,
             per_device_train_batch_size=per_device_train_batch_size,
             gradient_accumulation_steps=gradient_accumulation_steps,
@@ -134,21 +132,22 @@ class CharacterChatbot():
             report_to="none",
         )
         
-        max_seg_len = 512
         trainer = SFTTrainer(
-            model = model,
-            train_dataset = dataset,
+            model=model,
+            train_dataset=dataset,
             peft_config=peft_config,
             dataset_text_field="prompt",
-            max_seg_len=max_seg_len,
+            max_seq_length=512,
             tokenizer=toknizer,
             args=training_args,
         )
         trainer.train()
-        #Save model
+        
+        # Save model
         trainer.model.save_pretrained("final_ckpt")
         toknizer.save_pretrained("final_ckpt")
-        #Flush memory
+        
+        # Flush memory
         del model, trainer
         gc.collect()
         
@@ -160,13 +159,12 @@ class CharacterChatbot():
             device_map=self.device,
         )
         
-        tokenizer = AutoTokenizer.from_pretrained(
-            base_model_name_or_path,
-        )
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
         model = PeftModel.from_pretrained(base_model, "final_ckpt")
         model.push_to_hub(self.model_path)
         tokenizer.push_to_hub(self.model_path)
-        #Flush memory
+        
+        # Flush memory
         del model, base_model
         gc.collect()
         
