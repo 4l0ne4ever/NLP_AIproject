@@ -1,5 +1,7 @@
 import torch
 import gc
+import os
+import glob
 import huggingface_hub
 import pandas as pd
 from datasets import Dataset
@@ -10,17 +12,13 @@ import transformers
 class CharacterChatbot():
     def __init__(self,
                 model_path,
-                data_path = ["/content/data/transcripts/transcriptS01E05.csv",
-                            "/content/data/transcripts/transcriptS01E08.csv",
-                            "/content/data/transcripts/transcriptS02E07.csv",
-                            "/content/data/transcripts/transcriptS02E09.csv",
-                            "/content/data/transcripts/transcriptS03E08.csv",
-                            "/content/data/transcripts/transcriptS04E07.csv",
-                            "/content/data/transcripts/transcriptS04E09.csv",],
+                data_path = "/content/data/transcripts/",
                 huggingface_token=None,
                 ):
         self.model_path = model_path
-        self.data_path = data_path
+        self.data_files = glob.glob(os.path.join(data_path, "*.csv"))
+        if not self.data_files:
+            raise ValueError(f"No CSV files found in {data_path}")
         self.huggingface_token = huggingface_token
         self.base_model_path = "meta-llama/Llama-3.2-3B-Instruct"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -56,7 +54,7 @@ class CharacterChatbot():
             
     def load_data(self):
         transcript_df = pd.concat(
-            [pd.read_csv(path, on_bad_lines="skip") for path in self.data_path],
+            [pd.read_csv(file, on_bad_lines="skip") for file in self.data_files],
             ignore_index=True
         )
         transcript_df = transcript_df.dropna()
@@ -90,7 +88,7 @@ class CharacterChatbot():
           logging_steps=10,
           learning_rate=2e-4,
           max_grad_norm=0.3,
-          max_steps=300,
+          max_steps=500,
           warmup_ratio=0.3,
           lr_scheduler_type="constant"):
         bnb_config = BitsAndBytesConfig(
