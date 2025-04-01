@@ -10,9 +10,12 @@ import transformers
 class CharacterChatbot():
     def __init__(self,
                 model_path,
-                data_path = ["/content/data/transcripts/transcriptS01E08.csv",
+                data_path = ["/content/data/transcripts/transcriptS01E05.csv"
+                            "/content/data/transcripts/transcriptS01E08.csv",
+                            "/content/data/transcripts/transcriptS02E07.csv",
                             "/content/data/transcripts/transcriptS02E09.csv",
                             "/content/data/transcripts/transcriptS03E08.csv",
+                            "/content/data/transcripts/transcriptS04E07.csv",
                             "/content/data/transcripts/transcriptS04E09.csv",],
                 huggingface_token=None,
                 ):
@@ -67,7 +70,8 @@ class CharacterChatbot():
         prompts = []
         for ind in indexes_to_take:
             prompt = system_prompt
-            prompt += transcript_df.iloc[ind -1]['line'] + '\n'
+            prompt += transcript_df.iloc[ind -1]['line']
+            prompt += "\n"
             prompt += transcript_df.iloc[ind]['line']
             prompts.append(prompt)
             
