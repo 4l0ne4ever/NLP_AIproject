@@ -16,9 +16,13 @@ class CharacterChatbot():
                 huggingface_token=None,
                 ):
         self.model_path = model_path
+        data_path = os.path.abspath(data_path.rstrip('/')) + '/'
+        if not os.path.isdir(data_path):
+            raise ValueError(f"Data directory does not exist: {data_path}")
         self.data_files = glob.glob(os.path.join(data_path, "*.csv"))
         if not self.data_files:
-            raise ValueError(f"No CSV files found in {data_path}")
+            raise ValueError(f"No CSV files found in {data_path}. Directory exists: {os.path.exists(data_path)}")
+        print(f"Successfully found {len(self.data_files)} CSV files in {data_path}:")
         self.huggingface_token = huggingface_token
         self.base_model_path = "meta-llama/Llama-3.2-3B-Instruct"
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
