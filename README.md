@@ -1,5 +1,7 @@
 Link to my model: https://huggingface.co/christopherxzyx
-#About this project
+
+### About this project
+
 Problem:
 In the entertainment industry, especially with series like Stranger Things, fans often want to engage more deeply with their favorite characters like Eleven, Mike, or Dustin. 
 However, merely watching the series or reading about it cannot provide the experience of direct interaction. The problem posed is:
