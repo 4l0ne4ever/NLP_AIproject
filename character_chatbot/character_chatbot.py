@@ -82,19 +82,19 @@ class CharacterChatbot():
         return dataset
     
     def train(self,
-          base_model_name_or_path,
-          dataset,
-          output_dir="./results",
-          per_device_train_batch_size=1,
-          gradient_accumulation_steps=1,
-          optimizer="paged_adamw_32bit",
-          save_steps=200,
-          logging_steps=10,
-          learning_rate=2e-4,
-          max_grad_norm=0.3,
-          max_steps=500,
-          warmup_ratio=0.3,
-          lr_scheduler_type="constant"):
+            base_model_name_or_path,
+            dataset,
+            output_dir="./results",
+            per_device_train_batch_size=1,  # Keep safe
+            gradient_accumulation_steps=1,  # Keep safe
+            optimizer="paged_adamw_32bit",
+            save_steps=200,
+            logging_steps=10,
+            learning_rate=5e-5,  # Stable LR
+            max_grad_norm=0.3,
+            max_steps=600,  # Moderate increase
+            warmup_ratio=0.1,  # Reduced
+            lr_scheduler_type="cosine"):  # Smoother decay
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
@@ -106,27 +106,33 @@ class CharacterChatbot():
             trust_remote_code=True,
         )
         model.config.use_cache = False
-        toknizer = AutoTokenizer.from_pretrained(base_model_name_or_path)  # Kept typo
-        toknizer.pad_token = toknizer.eos_token
-        
+        tokenizer = AutoTokenizer.from_pretrained(base_model_name_or_path)
+        tokenizer.pad_token = tokenizer.eos_token
+
         # Preprocess dataset
         def preprocess_function(examples):
-            return toknizer(examples["prompt"], truncation=True, padding="max_length", max_length=512)
-        
+            return tokenizer(examples["prompt"], truncation=True, padding="max_length", max_length=512)
+
         dataset = dataset.map(preprocess_function, batched=True)
-        
+
         # LoRA config
         lora_alpha = 16
         lora_dropout = 0.1
-        lora_r = 64
+        lora_r = 64  # Keep safe
         peft_config = LoraConfig(
             lora_alpha=lora_alpha,
             lora_dropout=lora_dropout,
             r=lora_r,
             bias="none",
             task_type="CAUSAL_LM",
+            target_modules=["q_proj", "v_proj", "k_proj"],  # Add k_proj only
         )
-        
+
+        # Split dataset
+        train_size = int(0.8 * len(dataset))
+        train_dataset = dataset.select(range(train_size))
+        eval_dataset = dataset.select(range(train_size, len(dataset)))
+
         training_args = TrainingArguments(
             output_dir=output_dir,
             per_device_train_batch_size=per_device_train_batch_size,
@@ -142,24 +148,26 @@ class CharacterChatbot():
             group_by_length=True,
             lr_scheduler_type=lr_scheduler_type,
             report_to="none",
+            gradient_checkpointing=True,  # Save memory
+            evaluation_strategy="steps",  # Monitor performance
+            eval_steps=50,
+            save_strategy="steps",
+            load_best_model_at_end=True,
+            metric_for_best_model="eval_loss",
         )
-        
+
         trainer = SFTTrainer(
             model=model,
-            train_dataset=dataset,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
             peft_config=peft_config,
             args=training_args,
         )
         trainer.train()
-        
-        # Save model
+
+        # Save and merge model
         trainer.model.save_pretrained("final_ckpt")
-        toknizer.save_pretrained("final_ckpt")  # Kept typo
-        
-        # Flush memory
-        del model, trainer
-        gc.collect()
-        
+        tokenizer.save_pretrained("final_ckpt")
         base_model = AutoModelForCausalLM.from_pretrained(
             base_model_name_or_path,
             return_dict=True,
@@ -167,15 +175,15 @@ class CharacterChatbot():
             torch_dtype=torch.float16,
             device_map=self.device,
         )
-        
-        toknizer = AutoTokenizer.from_pretrained(base_model_name_or_path)  # Kept typo
         model = PeftModel.from_pretrained(base_model, "final_ckpt")
+        model = model.merge_and_unload()  # Merge LoRA weights
         model.push_to_hub(self.model_path)
-        toknizer.push_to_hub(self.model_path)  # Kept typo
-        
+        tokenizer.push_to_hub(self.model_path)
+
         # Flush memory
-        del model, base_model
+        del model, base_model, trainer
         gc.collect()
+        torch.cuda.empty_cache()
         
     def chat(self, message, history):
         messages = []
@@ -202,7 +210,7 @@ class CharacterChatbot():
         ]
         output = self.model(
             messages,
-            max_length=256,
+            max_length=512,
             eos_token_id=terminator,
             do_sample=True,
             temperature=0.6,
