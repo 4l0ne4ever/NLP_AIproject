@@ -125,7 +125,7 @@ class CharacterChatbot():
             r=lora_r,
             bias="none",
             task_type="CAUSAL_LM",
-            target_modules=["q_proj", "v_proj", "k_proj"],  # Add k_proj only
+            target_modules=["k_proj"],  
         )
 
         # Split dataset
