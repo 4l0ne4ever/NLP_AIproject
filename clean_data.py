@@ -14,8 +14,8 @@ nltk.download('wordnet')
 lemmatizer = WordNetLemmatizer()
 
 # Path files
-input_file = '/Users/duongcongthuyet/Downloads/workspace/AI /project/data/locations.jsonl'
-output_file = '/Users/duongcongthuyet/Downloads/workspace/AI /project/data/locations_cleaned.jsonl'
+input_file = './data/locations.jsonl'
+output_file = '.data/locations_cleaned.jsonl'
 
 # Check if input file exists
 if not os.path.exists(input_file):

@@ -7,7 +7,7 @@ device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
 print(f"Using device: {device}")
 
 # Tải dữ liệu từ file JSON
-with open("/Users/duongcongthuyet/Downloads/workspace/AI /IT3180/character_chatbot/result/chatbot_results.json", "r", encoding="utf-8") as f:
+with open("chatbot_results.json", "r", encoding="utf-8") as f:
     test_data = json.load(f)
 
 # Tải mô hình reranker
