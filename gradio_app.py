@@ -5,10 +5,17 @@ from character_network import NamedEntityRecognizer
 from character_network import CharacterNetworkGenerator
 from text_classification import LocationClassifier
 from character_chatbot import CharacterChatbot
+from character_chatbot.character_chatbotQwen import CharacterChatbotQwen
 from dotenv import load_dotenv
 
 load_dotenv()
-
+chatbot_qwen = CharacterChatbotQwen(
+    "christopherxzyx/StrangerThings_Qwen-3-4B",
+    huggingface_token=os.getenv('huggingface_token'),
+)
+def character_chatbot_withQwen(message, history):
+    output = chatbot_qwen.chat(message, history)
+    return output.strip()
 def get_themes(theme_list_str, subtitles_path, save_path):
     try:
         theme_list = theme_list_str.split(",")
@@ -111,6 +118,12 @@ def main():
             with gr.Column():
                 gr.HTML("<h1>Character Chatbot (LLMs)</h1>")
                 gr.ChatInterface(chat_with_character)
+        
+        #Character Chatbot Qwen 
+        with gr.Row():
+            with gr.Column():
+                gr.HTML("<h1>Character Chatbot (Qwen)</h1>")
+                gr.ChatInterface(character_chatbot_withQwen)
                 
     interface.launch(share=True, debug=True)  # Bật debug để xem log
 
