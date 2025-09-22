@@ -1,6 +1,14 @@
-Link to my model: https://huggingface.co/christopherxzyx
+# Stranger Things NLP - Character Chatbot Project
 
-### About this project
+**Interactive Character Chatbots from Netflix's Stranger Things**
+
+**Link to trained models:** https://huggingface.co/christopherxzyx
+
+**[Complete Project Guide](PROJECT_GUIDE.md)** - Comprehensive documentation for setup, development, and deployment
+
+---
+
+## About this project
 
 Problem:
 In the entertainment industry, especially with series like Stranger Things, fans often want to engage more deeply with their favorite characters like Eleven, Mike, or Dustin.
@@ -58,3 +66,57 @@ Advantages of the Solution:
 High personalization: Chatbot accurately reflects the style of Stranger Things characters.
 Flexibility: Can be applied to multiple characters in the series.
 User-friendly: Gradio interface is intuitive and requires no technical knowledge from users.
+
+---
+
+## Quick Start
+
+### Local Development
+```bash
+# Setup environment
+source venv/bin/activate
+export huggingface_token="your_token_here"
+
+# Run the application
+python gradio_app.py
+```
+
+### AWS Production Deployment
+```bash
+# Initialize AWS setup
+source venv/bin/activate
+python3 deploy_aws.py init
+
+# Upload data and start training
+python3 deploy_aws.py upload-data
+python3 deploy_aws.py train llama
+
+# Deploy publicly
+python3 deploy_aws.py deploy-gradio
+```
+
+**For detailed instructions, see [PROJECT_GUIDE.md](PROJECT_GUIDE.md)**
+
+---
+
+## Project Structure
+
+```
+project/
+├── PROJECT_GUIDE.md        # Complete documentation
+├── README.md              # This file
+├── WARP.md               # Development guidelines
+├── gradio_app.py         # Main web interface
+├── deploy_aws.py         # AWS deployment CLI
+├── aws_config.yaml       # AWS configuration
+├── requirements.txt      # Dependencies
+├── venv/                # Python environment
+├── aws/                 # AWS infrastructure code
+├── character_chatbot/   # Chatbot models
+├── theme_classifier/    # Theme analysis
+├── character_network/   # Network analysis
+├── text_classification/ # Location classifier
+├── utils/              # Utilities
+├── data/               # Training data
+└── stubs/              # Output results
+```

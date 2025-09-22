@@ -1,4 +1,10 @@
 accelerate==1.5.2
+# AWS dependencies
+boto3>=1.28.0
+paramiko>=3.3.0
+scp>=0.14.4
+fabric>=3.2.0
+PyYAML>=6.0
 aiofiles==23.2.1
 aiohappyeyeballs==2.6.1
 aiohttp==3.11.14
