@@ -6,6 +6,8 @@
 
 **[Complete Project Guide](PROJECT_GUIDE.md)** - Comprehensive documentation for setup, development, and deployment
 
+**[AWS SageMaker Integration](SAGEMAKER_INTEGRATION.md)** - Production-ready ML platform with scalable training and deployment
+
 ---
 
 ## About this project
@@ -81,7 +83,7 @@ export huggingface_token="your_token_here"
 python gradio_app.py
 ```
 
-### AWS Production Deployment
+### AWS Production Deployment (EC2)
 ```bash
 # Initialize AWS setup
 source venv/bin/activate
@@ -95,7 +97,22 @@ python3 deploy_aws.py train llama
 python3 deploy_aws.py deploy-gradio
 ```
 
-**For detailed instructions, see [PROJECT_GUIDE.md](PROJECT_GUIDE.md)**
+### AWS SageMaker Deployment (Recommended for Production)
+```bash
+# Setup and deploy with SageMaker
+cd sagemaker
+
+# Build custom training container
+cd docker && ./build_and_push.sh && cd ..
+
+# Deploy infrastructure, train models, and create endpoints
+python deploy.py --setup-infrastructure --train-all --deploy-all
+
+# Launch SageMaker-enabled interface
+python gradio_app.py
+```
+
+**For detailed instructions, see [PROJECT_GUIDE.md](PROJECT_GUIDE.md) and [SAGEMAKER_INTEGRATION.md](SAGEMAKER_INTEGRATION.md)**
 
 ---
 
@@ -105,12 +122,14 @@ python3 deploy_aws.py deploy-gradio
 project/
 ├── PROJECT_GUIDE.md        # Complete documentation
 ├── README.md              # This file
+├── SAGEMAKER_INTEGRATION.md # AWS SageMaker integration guide
 ├── WARP.md               # Development guidelines
 ├── gradio_app.py         # Main web interface
 ├── deploy_aws.py         # AWS deployment CLI
 ├── aws_config.yaml       # AWS configuration
 ├── requirements.txt      # Dependencies
 ├── venv/                # Python environment
+├── sagemaker/           # AWS SageMaker integration
 ├── aws/                 # AWS infrastructure code
 ├── character_chatbot/   # Chatbot models
 ├── theme_classifier/    # Theme analysis

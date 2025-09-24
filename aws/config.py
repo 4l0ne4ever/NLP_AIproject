@@ -136,62 +136,98 @@ class AWSConfigManager:
             print(f"Error saving config: {e}")
     
     def get_ec2_user_data_script(self) -> str:
-        """Generate EC2 user data script for instance setup"""
+        """Generate EC2 user data script for instance setup (Amazon Linux 2)"""
         user_data = f"""#!/bin/bash
 set -e
 
-# Update system
-apt-get update
-apt-get install -y python3-pip python3-venv git htop nvtop
+# Log all output for debugging
+exec > >(tee /var/log/user-data.log) 2>&1
+echo "Starting user data script at $(date)"
+
+# Expand the root filesystem to use full EBS volume
+echo "Expanding root filesystem..."
+partition_name=$(lsblk -o NAME,MOUNTPOINT | grep ' /$' | awk '{{print $1}}')
+device_name="/dev/$(lsblk -no PKNAME /dev/"$partition_name")"
+echo "Device: $device_name, Partition: /dev/$partition_name"
+growpart $device_name 1
+xfs_growfs /
+echo "Root filesystem expanded"
+
+# Update system (Amazon Linux 2)
+yum update -y
+yum install -y python3-pip git htop tree unzip
+
+# Install development tools
+yum groupinstall -y "Development Tools"
+yum install -y python3-devel
 
 # Install NVIDIA drivers and CUDA (for GPU instances)
 if lspci | grep -i nvidia > /dev/null; then
-    # Install NVIDIA drivers
-    ubuntu-drivers autoinstall
+    echo "Installing NVIDIA drivers..."
     
-    # Install CUDA toolkit
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/cuda-keyring_1.0-1_all.deb
-    dpkg -i cuda-keyring_1.0-1_all.deb
-    apt-get update
-    apt-get -y install cuda-toolkit-11-8
+    # Install EPEL repository
+    amazon-linux-extras install -y epel
+    
+    # Install NVIDIA drivers
+    yum install -y kernel-devel-$(uname -r) kernel-headers-$(uname -r)
+    
+    # Install CUDA repository
+    wget https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-repo-rhel7-11.8.0-1.x86_64.rpm
+    rpm -i cuda-repo-rhel7-11.8.0-1.x86_64.rpm
+    yum clean all
+    yum install -y cuda-11-8
     
     # Add CUDA to PATH
     echo 'export PATH=/usr/local/cuda-11.8/bin${{PATH:+:${{PATH}}}}' >> /etc/environment
     echo 'export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64${{LD_LIBRARY_PATH:+:${{LD_LIBRARY_PATH}}}}' >> /etc/environment
+    
+    # Create symbolic link for CUDA
+    ln -sf /usr/local/cuda-11.8 /usr/local/cuda
+    
+    echo "NVIDIA setup completed"
 fi
 
 # Create working directory
-mkdir -p /home/ubuntu/stranger-things-nlp
-chown ubuntu:ubuntu /home/ubuntu/stranger-things-nlp
+echo "Setting up working directory..."
+mkdir -p /home/ec2-user/stranger-things-nlp
+chown ec2-user:ec2-user /home/ec2-user/stranger-things-nlp
 
-# Install AWS CLI
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-./aws/install
+# Install AWS CLI v2 (if not already installed)
+if ! command -v aws &> /dev/null; then
+    echo "Installing AWS CLI v2..."
+    curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    unzip awscliv2.zip
+    ./aws/install
+    rm -rf aws awscliv2.zip
+fi
 
-# Set up Python environment as ubuntu user
-sudo -u ubuntu bash << 'EOF'
-cd /home/ubuntu/stranger-things-nlp
+# Set up Python environment as ec2-user
+echo "Setting up Python environment..."
+sudo -u ec2-user bash << 'EOF'
+cd /home/ec2-user/stranger-things-nlp
 
 # Create virtual environment
+echo "Creating virtual environment..."
 python3 -m venv venv
 source venv/bin/activate
 
-# Install PyTorch with CUDA support
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# Upgrade pip first
+pip install --upgrade pip
 
-# Install other requirements (will be uploaded separately)
-# pip install -r requirements.txt
+# Install PyTorch with CUDA support (compatible versions for CUDA 11.8)
+echo "Installing PyTorch..."
+pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
 
-echo "EC2 setup completed" >> setup.log
+# Install commonly needed packages
+echo "Installing basic ML packages..."
+pip install transformers accelerate datasets peft bitsandbytes scipy numpy pandas
+
+echo "Python environment setup completed" >> setup.log
+echo "Setup completed at $(date)" >> setup.log
 EOF
 
-# Reboot to ensure NVIDIA drivers are loaded properly (for GPU instances)
-if lspci | grep -i nvidia > /dev/null; then
-    reboot
-fi"""
-        # Base64 encode the user data as required by AWS
-        return base64.b64encode(user_data.encode('utf-8')).decode('ascii')
+echo "User data script completed at $(date)"
+"""
         return user_data
     
     def get_training_environment_vars(self) -> Dict[str, str]:

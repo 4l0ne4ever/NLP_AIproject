@@ -1,0 +1,53 @@
+endpoint:
+  container_startup_health_check_timeout: 600
+  enable_auto_scaling: true
+  enable_multi_model: true
+  enable_serverless: false
+  endpoint_config_name: stranger-things-config-1758649883
+  endpoint_name: stranger-things-endpoint-1758649883
+  initial_instance_count: 1
+  instance_type: ml.m5.large
+  max_capacity: 4
+  min_capacity: 1
+  model_data_download_timeout: 600
+  model_name: stranger-things-model-1758649883
+  serverless_max_concurrency: 20
+  serverless_memory_size: 4096
+  target_invocations_per_instance: 100
+s3:
+  batch_input_path: batch-input/
+  batch_output_path: batch-output/
+  bucket_name: stranger-things-sagemaker-159182460041
+  checkpoints_path: checkpoints/
+  data_capture_path: data-capture/
+  model_artifacts_path: models/
+  pipeline_artifacts_path: pipeline-artifacts/
+  region: us-east-1
+  training_data_path: data/training/
+training:
+  base_job_name: stranger-things
+  checkpoint_s3_uri: s3://stranger-things-sagemaker/checkpoints/
+  distribution_type: data_parallel
+  enable_checkpointing: true
+  enable_distributed_training: false
+  framework_version: 2.0.1
+  hyperparameters:
+    batch_size: '1'
+    fp16: 'true'
+    gradient_accumulation_steps: '4'
+    gradient_checkpointing: 'true'
+    learning_rate: 2e-4
+    lora_alpha: '16'
+    lora_dropout: '0.1'
+    lora_r: '64'
+    max_steps: '1000'
+    num_epochs: '3'
+  input_mode: File
+  instance_count: 1
+  instance_type: ml.m5.large
+  max_runtime_seconds: 86400
+  output_path: s3://stranger-things-sagemaker/models/
+  python_version: py310
+  role_arn: arn:aws:iam::159182460041:role/SageMakerExecutionRole
+  training_image: 763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-training:2.0.1-cpu-py310-ubuntu20.04-sagemaker
+  volume_size_gb: 100

@@ -1,0 +1,43 @@
+{
+  "TrainingJobName": "stranger-things-cpu-fixed",
+  "RoleArn": "arn:aws:iam::159182460041:role/SageMakerExecutionRole",
+  "AlgorithmSpecification": {
+    "TrainingImage": "763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-training:2.0.1-transformers4.28.1-gpu-py310-cu118-ubuntu20.04-sagemaker",
+    "TrainingInputMode": "File"
+  },
+  "InputDataConfig": [
+    {
+      "ChannelName": "training",
+      "DataSource": {
+        "S3DataSource": {
+          "S3DataType": "S3Prefix",
+          "S3Uri": "s3://stranger-things-sagemaker/training-data/",
+          "S3DataDistributionType": "FullyReplicated"
+        }
+      },
+      "ContentType": "text/csv",
+      "InputMode": "File"
+    }
+  ],
+  "HyperParameters": {
+    "sagemaker_program": "train.py",
+    "sagemaker_submit_directory": "s3://stranger-things-sagemaker/code/sourcedir-cpu.tar.gz",
+    "base_model": "microsoft/DialoGPT-medium",
+    "batch_size": "1",
+    "learning_rate": "0.0002",
+    "max_steps": "20",
+    "num_epochs": "1",
+    "fp16": "false"
+  },
+  "OutputDataConfig": {
+    "S3OutputPath": "s3://stranger-things-sagemaker/output/"
+  },
+  "ResourceConfig": {
+    "InstanceType": "ml.m5.xlarge",
+    "InstanceCount": 1,
+    "VolumeSizeInGB": 30
+  },
+  "StoppingCondition": {
+    "MaxRuntimeInSeconds": 3600
+  }
+}

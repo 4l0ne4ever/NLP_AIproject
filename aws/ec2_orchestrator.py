@@ -263,17 +263,50 @@ class EC2TrainingOrchestrator:
             
             # Connect to instance
             key_path = Path(f"~/.ssh/{self.config.ec2_config.key_pair_name}.pem").expanduser()
-            ssh_client.connect(
-                hostname=instance_info['public_ip'],
-                username='ubuntu',
-                key_filename=str(key_path)
-            )
+            
+            # Load private key
+            try:
+                from paramiko import RSAKey, Ed25519Key, ECDSAKey
+                # Try different key types
+                private_key = None
+                for key_class in [RSAKey, Ed25519Key, ECDSAKey]:
+                    try:
+                        private_key = key_class.from_private_key_file(str(key_path))
+                        break
+                    except Exception:
+                        continue
+                
+                if private_key is None:
+                    raise Exception(f"Could not load private key from {key_path}")
+                
+                ssh_client.connect(
+                    hostname=instance_info['public_ip'],
+                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    pkey=private_key
+                )
+            except Exception as e:
+                # Fallback to key_filename method
+                self.logger.warning(f"Failed to load key manually: {e}, trying key_filename method")
+                ssh_client.connect(
+                    hostname=instance_info['public_ip'],
+                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    key_filename=str(key_path)
+                )
+            
+            # Create base directory first
+            ssh_client.exec_command(f"mkdir -p /home/ec2-user/stranger-things-nlp")
             
             # Upload project files
             sftp = ssh_client.open_sftp()
             
             local_path = Path(local_project_path)
-            remote_base = "/home/ubuntu/stranger-things-nlp"
+            remote_base = "/home/ec2-user/stranger-things-nlp"
+            
+            # Ensure remote base directory exists
+            try:
+                sftp.mkdir(remote_base)
+            except Exception:
+                pass  # Directory might already exist
             
             # Upload essential files
             essential_files = [
@@ -302,7 +335,8 @@ class EC2TrainingOrchestrator:
             
             # Install requirements
             commands = [
-                "cd /home/ubuntu/stranger-things-nlp",
+                "cd /home/ec2-user/stranger-things-nlp",
+                "python3 -m venv venv",  # Create virtual environment first
                 "source venv/bin/activate",
                 "pip install -r requirements.txt"
             ]
@@ -333,11 +367,35 @@ class EC2TrainingOrchestrator:
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
             key_path = Path(f"~/.ssh/{self.config.ec2_config.key_pair_name}.pem").expanduser()
-            ssh_client.connect(
-                hostname=instance_info['public_ip'],
-                username='ubuntu',
-                key_filename=str(key_path)
-            )
+            
+            # Load private key
+            try:
+                from paramiko import RSAKey, Ed25519Key, ECDSAKey
+                # Try different key types
+                private_key = None
+                for key_class in [RSAKey, Ed25519Key, ECDSAKey]:
+                    try:
+                        private_key = key_class.from_private_key_file(str(key_path))
+                        break
+                    except Exception:
+                        continue
+                
+                if private_key is None:
+                    raise Exception(f"Could not load private key from {key_path}")
+                
+                ssh_client.connect(
+                    hostname=instance_info['public_ip'],
+                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    pkey=private_key
+                )
+            except Exception as e:
+                # Fallback to key_filename method
+                self.logger.warning(f"Failed to load key manually: {e}, trying key_filename method")
+                ssh_client.connect(
+                    hostname=instance_info['public_ip'],
+                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    key_filename=str(key_path)
+                )
             
             # Set environment variables
             env_vars = self.config.get_training_environment_vars()
@@ -345,7 +403,7 @@ class EC2TrainingOrchestrator:
             
             # Start training command
             training_script = f"""
-            cd /home/ubuntu/stranger-things-nlp
+            cd /home/ec2-user/stranger-things-nlp
             source venv/bin/activate
             {env_setup}
             
@@ -392,15 +450,39 @@ class EC2TrainingOrchestrator:
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             
             key_path = Path(f"~/.ssh/{self.config.ec2_config.key_pair_name}.pem").expanduser()
-            ssh_client.connect(
-                hostname=instance_info['public_ip'],
-                username='ubuntu',
-                key_filename=str(key_path)
-            )
+            
+            # Load private key
+            try:
+                from paramiko import RSAKey, Ed25519Key, ECDSAKey
+                # Try different key types
+                private_key = None
+                for key_class in [RSAKey, Ed25519Key, ECDSAKey]:
+                    try:
+                        private_key = key_class.from_private_key_file(str(key_path))
+                        break
+                    except Exception:
+                        continue
+                
+                if private_key is None:
+                    raise Exception(f"Could not load private key from {key_path}")
+                
+                ssh_client.connect(
+                    hostname=instance_info['public_ip'],
+                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    pkey=private_key
+                )
+            except Exception as e:
+                # Fallback to key_filename method
+                self.logger.warning(f"Failed to load key manually: {e}, trying key_filename method")
+                ssh_client.connect(
+                    hostname=instance_info['public_ip'],
+                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    key_filename=str(key_path)
+                )
             
             # Start Gradio app
             gradio_command = f"""
-            cd /home/ubuntu/stranger-things-nlp
+            cd /home/ec2-user/stranger-things-nlp
             source venv/bin/activate
             
             export GRADIO_SERVER_NAME=0.0.0.0
@@ -486,15 +568,14 @@ class EC2TrainingOrchestrator:
         # Add Gradio-specific setup
         gradio_setup = """
 # Additional setup for Gradio hosting
-sudo -u ubuntu bash << 'EOF'
-cd /home/ubuntu/stranger-things-nlp
+sudo -u ec2-user bash << 'EOF'
+cd /home/ec2-user/stranger-things-nlp
 
 # Install nginx for reverse proxy (optional)
-# sudo apt-get install -y nginx
+# sudo yum install -y nginx  # Use yum for Amazon Linux
 
 echo "Gradio instance setup completed" >> gradio_setup.log
-EOF
-"""
+EOF"""
         
         return base_script + "\n" + gradio_setup
     
