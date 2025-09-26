@@ -136,7 +136,7 @@ class AWSConfigManager:
             print(f"Error saving config: {e}")
     
     def get_ec2_user_data_script(self) -> str:
-        """Generate EC2 user data script for instance setup (Amazon Linux 2)"""
+        """Generate EC2 user data script for instance setup (Ubuntu)"""
         user_data = f"""#!/bin/bash
 set -e
 
@@ -144,53 +144,114 @@ set -e
 exec > >(tee /var/log/user-data.log) 2>&1
 echo "Starting user data script at $(date)"
 
+# Update system packages
+apt update -y
+apt upgrade -y
+
+# Install essential packages for Ubuntu
+apt install -y python3-pip python3-venv python3-dev git htop tree unzip curl wget
+apt install -y build-essential software-properties-common
+
 # Expand the root filesystem to use full EBS volume
 echo "Expanding root filesystem..."
-partition_name=$(lsblk -o NAME,MOUNTPOINT | grep ' /$' | awk '{{print $1}}')
-device_name="/dev/$(lsblk -no PKNAME /dev/"$partition_name")"
-echo "Device: $device_name, Partition: /dev/$partition_name"
-growpart $device_name 1
-xfs_growfs /
+resize2fs /dev/$(df / | tail -1 | cut -d' ' -f1 | sed 's/[0-9]*$//')
 echo "Root filesystem expanded"
 
-# Update system (Amazon Linux 2)
-yum update -y
-yum install -y python3-pip git htop tree unzip
+# Set up additional EBS volumes
+echo "Setting up additional storage volumes..."
 
-# Install development tools
-yum groupinstall -y "Development Tools"
-yum install -y python3-devel
+# Wait for volumes to be available
+sleep 10
+
+# Format and mount model storage volume (handle both /dev/sdf and NVMe naming)
+# Try NVMe naming first (for newer instances)
+MODEL_DEVICE=""
+CACHE_DEVICE=""
+
+# Find available NVMe devices for model and cache storage
+for device in /dev/nvme*n1; do
+    if [ -b "$device" ] && [ "$device" != "/dev/nvme0n1" ]; then
+        # Get device size to determine usage (200GB for models, 100GB for cache)
+        SIZE=$(lsblk -b -n -d "$device" | awk '{{print $4}}')
+        SIZE_GB=$((SIZE / 1024 / 1024 / 1024))
+        
+        if [ $SIZE_GB -ge 180 ] && [ -z "$MODEL_DEVICE" ]; then
+            MODEL_DEVICE="$device"
+            echo "Found model storage device: $device ($SIZE_GB GB)"
+        elif [ $SIZE_GB -ge 80 ] && [ $SIZE_GB -lt 180 ] && [ -z "$CACHE_DEVICE" ]; then
+            CACHE_DEVICE="$device"
+            echo "Found cache storage device: $device ($SIZE_GB GB)"
+        fi
+    fi
+done
+
+# Fall back to traditional naming if NVMe not found
+if [ -z "$MODEL_DEVICE" ] && [ -b "/dev/sdf" ]; then
+    MODEL_DEVICE="/dev/sdf"
+fi
+if [ -z "$CACHE_DEVICE" ] && [ -b "/dev/sdg" ]; then
+    CACHE_DEVICE="/dev/sdg"
+fi
+
+# Set up model storage volume
+if [ -n "$MODEL_DEVICE" ] && [ -b "$MODEL_DEVICE" ]; then
+    echo "Setting up model storage volume on $MODEL_DEVICE..."
+    mkfs -t xfs "$MODEL_DEVICE"
+    mkdir -p /mnt/models
+    mount "$MODEL_DEVICE" /mnt/models
+    echo "$MODEL_DEVICE /mnt/models xfs defaults,nofail 0 2" >> /etc/fstab
+    chown ubuntu:ubuntu /mnt/models
+    chmod 755 /mnt/models
+    echo "Model storage volume mounted at /mnt/models"
+else
+    echo "Warning: No suitable device found for model storage"
+fi
+
+# Set up cache volume
+if [ -n "$CACHE_DEVICE" ] && [ -b "$CACHE_DEVICE" ]; then
+    echo "Setting up cache volume on $CACHE_DEVICE..."
+    mkfs -t ext4 "$CACHE_DEVICE"
+    mkdir -p /mnt/cache
+    mount "$CACHE_DEVICE" /mnt/cache
+    echo "$CACHE_DEVICE /mnt/cache ext4 defaults,nofail 0 2" >> /etc/fstab
+    chown ubuntu:ubuntu /mnt/cache
+    chmod 755 /mnt/cache
+    echo "Cache volume mounted at /mnt/cache"
+else
+    echo "Warning: No suitable device found for cache storage"
+fi
+
+# Create subdirectories for organized storage
+mkdir -p /mnt/models/{{checkpoints,trained_models,datasets}}
+mkdir -p /mnt/cache/{{transformers,huggingface,pip}}
+chown -R ubuntu:ubuntu /mnt/models /mnt/cache
+
+echo "Additional volumes setup completed"
 
 # Install NVIDIA drivers and CUDA (for GPU instances)
 if lspci | grep -i nvidia > /dev/null; then
     echo "Installing NVIDIA drivers..."
     
-    # Install EPEL repository
-    amazon-linux-extras install -y epel
+    # Install NVIDIA drivers for Ubuntu
+    apt install -y nvidia-driver-535 nvidia-utils-535
     
-    # Install NVIDIA drivers
-    yum install -y kernel-devel-$(uname -r) kernel-headers-$(uname -r)
-    
-    # Install CUDA repository
-    wget https://developer.download.nvidia.com/compute/cuda/repos/rhel7/x86_64/cuda-repo-rhel7-11.8.0-1.x86_64.rpm
-    rpm -i cuda-repo-rhel7-11.8.0-1.x86_64.rpm
-    yum clean all
-    yum install -y cuda-11-8
+    # Install CUDA toolkit
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb
+    dpkg -i cuda-keyring_1.0-1_all.deb
+    apt update -y
+    apt install -y cuda-toolkit-12-2
     
     # Add CUDA to PATH
-    echo 'export PATH=/usr/local/cuda-11.8/bin${{PATH:+:${{PATH}}}}' >> /etc/environment
-    echo 'export LD_LIBRARY_PATH=/usr/local/cuda-11.8/lib64${{LD_LIBRARY_PATH:+:${{LD_LIBRARY_PATH}}}}' >> /etc/environment
-    
-    # Create symbolic link for CUDA
-    ln -sf /usr/local/cuda-11.8 /usr/local/cuda
+    echo 'export PATH=/usr/local/cuda/bin${{PATH:+:${{PATH}}}}' >> /etc/environment
+    echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64${{LD_LIBRARY_PATH:+:${{LD_LIBRARY_PATH}}}}' >> /etc/environment
     
     echo "NVIDIA setup completed"
 fi
 
 # Create working directory
 echo "Setting up working directory..."
-mkdir -p /home/ec2-user/stranger-things-nlp
-chown ec2-user:ec2-user /home/ec2-user/stranger-things-nlp
+mkdir -p /home/ubuntu/stranger-things-nlp
+chown ubuntu:ubuntu /home/ubuntu/stranger-things-nlp
 
 # Install AWS CLI v2 (if not already installed)
 if ! command -v aws &> /dev/null; then
@@ -201,10 +262,10 @@ if ! command -v aws &> /dev/null; then
     rm -rf aws awscliv2.zip
 fi
 
-# Set up Python environment as ec2-user
+# Set up Python environment as ubuntu user
 echo "Setting up Python environment..."
-sudo -u ec2-user bash << 'EOF'
-cd /home/ec2-user/stranger-things-nlp
+sudo -u ubuntu bash << 'EOF'
+cd /home/ubuntu/stranger-things-nlp
 
 # Create virtual environment
 echo "Creating virtual environment..."
@@ -214,9 +275,9 @@ source venv/bin/activate
 # Upgrade pip first
 pip install --upgrade pip
 
-# Install PyTorch with CUDA support (compatible versions for CUDA 11.8)
+# Install PyTorch with CUDA support (latest compatible versions)
 echo "Installing PyTorch..."
-pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 torchaudio==0.13.1 --extra-index-url https://download.pytorch.org/whl/cu117
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Install commonly needed packages
 echo "Installing basic ML packages..."
@@ -235,9 +296,16 @@ echo "User data script completed at $(date)"
         return {
             'CUDA_VISIBLE_DEVICES': '0',
             'PYTORCH_CUDA_ALLOC_CONF': 'max_split_size_mb:128',
-            'TRANSFORMERS_CACHE': '/tmp/transformers_cache',
-            'HF_HOME': '/tmp/huggingface_cache',
+            'TRANSFORMERS_CACHE': '/mnt/cache/transformers',
+            'HF_HOME': '/mnt/cache/huggingface',
+            'HF_DATASETS_CACHE': '/mnt/cache/datasets',
+            'TORCH_HOME': '/mnt/cache/torch',
             'WANDB_DISABLED': 'true',  # Disable wandb logging by default
+            # Model storage paths
+            'MODEL_STORAGE_PATH': '/mnt/models',
+            'CHECKPOINT_PATH': '/mnt/models/checkpoints',
+            'TRAINED_MODELS_PATH': '/mnt/models/trained_models',
+            'DATASETS_PATH': '/mnt/models/datasets',
         }
     
     def validate_config(self) -> List[str]:

@@ -655,6 +655,15 @@ if __name__ == "__main__":
         if hf_token:
             final_hyperparameters['huggingface_token'] = hf_token
         
+        # Pass S3 and job metadata to the training script so it can upload logs/ckpts/processed data
+        final_hyperparameters['s3_bucket'] = self.config.s3_config.bucket_name
+        final_hyperparameters['s3_region'] = self.config.s3_config.region
+        final_hyperparameters['checkpoints_prefix'] = self.config.s3_config.checkpoints_path
+        final_hyperparameters['logs_prefix'] = getattr(self.config.s3_config, 'logs_path', 'logs/')
+        final_hyperparameters['processed_prefix'] = getattr(self.config.s3_config, 'processed_data_path', 'data/processed/')
+        final_hyperparameters['models_prefix'] = self.config.s3_config.model_artifacts_path
+        final_hyperparameters['job_name'] = job_name
+        
         # Training job definition
         training_job_def = {
             'TrainingJobName': job_name,
@@ -674,7 +683,7 @@ if __name__ == "__main__":
                             'S3DataDistributionType': 'FullyReplicated'
                         }
                     },
-                    'ContentType': 'application/json',
+'ContentType': 'text/csv',
                     'InputMode': self.config.training_config.input_mode
                 }
             ],

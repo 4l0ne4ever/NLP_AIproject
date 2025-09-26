@@ -1,5 +1,5 @@
 ec2:
-  ami_id: ami-0c02fb55956c7d316
+  ami_id: ami-0866a3c8686eaeeba
   availability_zone: us-east-1a
   instance_type: g4dn.xlarge
   key_pair_name: stranger-things-key-dct

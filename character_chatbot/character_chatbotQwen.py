@@ -30,13 +30,12 @@ class CharacterChatbotQwen():
         if self.huggingface_token is not None:
             huggingface_hub.login(self.huggingface_token)
             
+        # Only load model if repo exists; do not auto-train in __init__
         if huggingface_hub.repo_exists(self.model_path):
             self.model = self.load_model(self.model_path)
         else:
-            print(f"Model {self.model_path} not found. We will train our model.")
-            train_dataset = self.load_data()
-            self.train(self.base_model_path, train_dataset)
-            self.model = self.load_model(self.model_path)
+            print(f"Model {self.model_path} not found. Ready to train a new model when train() is called.")
+            self.model = None
             
     def load_model(self, model_path):
         bnb_config = BitsAndBytesConfig(
@@ -92,7 +91,10 @@ class CharacterChatbotQwen():
               max_grad_norm=0.3,
               max_steps=600,
               warmup_ratio=0.1,
-              lr_scheduler_type="cosine"):
+              lr_scheduler_type="cosine",
+              push_to_hub: bool = False,
+              s3_bucket_name: str = None,
+              run_id: str = None):
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
@@ -149,24 +151,48 @@ class CharacterChatbotQwen():
                 lr_scheduler_type=lr_scheduler_type,
                 report_to="none",
                 gradient_checkpointing=True,
-                eval_strategy="steps",  # Updated from evaluation_strategy
+                eval_strategy="steps",
                 eval_steps=50,
                 save_strategy="steps",
                 load_best_model_at_end=True,
                 metric_for_best_model="eval_loss",
+                logging_dir=f"{output_dir}/logs",
             )
         except Exception as e:
             print(f"Error in TrainingArguments: {e}")
             raise
 
+        # Initialize callbacks
+        callbacks = []
+        
+        # Add S3 checkpoint callback if S3 details provided  
+        if s3_bucket_name and run_id:
+            try:
+                import boto3
+                from .character_chatbot import S3CheckpointCallback
+                from config import S3_REGION
+                s3_client = boto3.client('s3', region_name=S3_REGION)
+                s3_prefix = f"live_checkpoints/{run_id}/"
+                s3_callback = S3CheckpointCallback(
+                    s3_client=s3_client,
+                    bucket_name=s3_bucket_name,
+                    s3_prefix=s3_prefix,
+                    upload_frequency=5  # Upload every 5th checkpoint to reduce overhead
+                )
+                callbacks.append(s3_callback)
+                print(f"📡 S3 live checkpoint saving enabled: s3://{s3_bucket_name}/{s3_prefix}")
+            except Exception as e:
+                print(f"Warning: Could not setup S3 live checkpointing: {e}")
+        
         trainer = SFTTrainer(
             model=model,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             peft_config=peft_config,
             args=training_args,
+            callbacks=callbacks,
         )
-        trainer.train()
+        result = trainer.train()
 
         trainer.model.save_pretrained("final_ckpt")
         tokenizer.save_pretrained("final_ckpt")
@@ -179,12 +205,26 @@ class CharacterChatbotQwen():
         )
         model = PeftModel.from_pretrained(base_model, "final_ckpt")
         model = model.merge_and_unload()
-        model.push_to_hub(self.model_path)
-        tokenizer.push_to_hub(self.model_path)
+
+        # Always save merged model locally
+        os.makedirs(output_dir, exist_ok=True)
+        model.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
+
+        # Optionally push to Hugging Face Hub
+        if push_to_hub and self.huggingface_token is not None:
+            try:
+                model.push_to_hub(self.model_path)
+                tokenizer.push_to_hub(self.model_path)
+            except Exception as e:
+                print(f"Warning: Failed to push to hub: {e}")
 
         del model, base_model, trainer
         gc.collect()
         torch.cuda.empty_cache()
+
+        metrics = getattr(result, 'metrics', {}) if 'result' in locals() and result is not None else {}
+        return metrics
         
     def chat(self, message, history):
         # Load tokenizer

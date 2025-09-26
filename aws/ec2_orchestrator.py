@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import paramiko
+import socket
 from pathlib import Path
 from typing import Dict, Optional, List, Tuple
 from botocore.exceptions import ClientError
@@ -94,6 +95,15 @@ class EC2TrainingOrchestrator:
         if training_job_name is None:
             training_job_name = f"training-{model_type}-{int(time.time())}"
         
+        # Enforce single active training job at a time
+        active_training = self._find_active_training_instances()
+        if active_training:
+            active_ids = ", ".join([i['instance_id'] for i in active_training])
+            raise Exception(
+                f"An active training instance already exists ({active_ids}). "
+                f"Only one training job is allowed at a time. Terminate the existing job to proceed."
+            )
+        
         # Ensure security group exists
         sg_id = self.create_security_group()
         
@@ -121,6 +131,26 @@ class EC2TrainingOrchestrator:
                                     'VolumeType': self.config.ec2_config.volume_type,
                                     'DeleteOnTermination': True
                                 }
+                            },
+                            # Additional volume for model storage and training data
+                            {
+                                'DeviceName': '/dev/sdf',
+                                'Ebs': {
+                                    'VolumeSize': 200,  # 200GB for models and training data
+                                    'VolumeType': 'gp3',
+                                    'DeleteOnTermination': True,
+                                    'Encrypted': True
+                                }
+                            },
+                            # Additional volume for cache and temporary files
+                            {
+                                'DeviceName': '/dev/sdg',
+                                'Ebs': {
+                                    'VolumeSize': 100,  # 100GB for cache
+                                    'VolumeType': 'gp3',
+                                    'DeleteOnTermination': True,
+                                    'Encrypted': True
+                                }
                             }
                         ],
                         'IamInstanceProfile': {
@@ -134,6 +164,21 @@ class EC2TrainingOrchestrator:
                 
                 # Wait for spot instance to be fulfilled
                 instance_id = self._wait_for_spot_instance(spot_request_id)
+                
+                # Tag the instance after fulfillment (spot tagging)
+                try:
+                    self.ec2_client.create_tags(
+                        Resources=[instance_id],
+                        Tags=[
+                            {'Key': 'Name', 'Value': f'stranger-things-training-{model_type}'},
+                            {'Key': 'Project', 'Value': 'stranger-things-nlp'},
+                            {'Key': 'Purpose', 'Value': 'training'},
+                            {'Key': 'ModelType', 'Value': model_type},
+                            {'Key': 'JobName', 'Value': training_job_name}
+                        ]
+                    )
+                except ClientError as e:
+                    self.logger.warning(f"Failed to tag spot instance {instance_id}: {e}")
                 
             else:
                 response = self.ec2_client.run_instances(
@@ -152,6 +197,26 @@ class EC2TrainingOrchestrator:
                                 'VolumeType': self.config.ec2_config.volume_type,
                                 'DeleteOnTermination': True
                             }
+                        },
+                        # Additional volume for model storage and training data
+                        {
+                            'DeviceName': '/dev/sdf',
+                            'Ebs': {
+                                'VolumeSize': 200,  # 200GB for models and training data
+                                'VolumeType': 'gp3',
+                                'DeleteOnTermination': True,
+                                'Encrypted': True
+                            }
+                        },
+                        # Additional volume for cache and temporary files
+                        {
+                            'DeviceName': '/dev/sdg',
+                            'Ebs': {
+                                'VolumeSize': 100,  # 100GB for cache
+                                'VolumeType': 'gp3',
+                                'DeleteOnTermination': True,
+                                'Encrypted': True
+                            }
                         }
                     ],
                     IamInstanceProfile={
@@ -163,7 +228,9 @@ class EC2TrainingOrchestrator:
                             'Tags': [
                                 {'Key': 'Name', 'Value': f'stranger-things-training-{model_type}'},
                                 {'Key': 'Project', 'Value': 'stranger-things-nlp'},
-                                {'Key': 'Purpose', 'Value': 'training'}
+                                {'Key': 'Purpose', 'Value': 'training'},
+                                {'Key': 'ModelType', 'Value': model_type},
+                                {'Key': 'JobName', 'Value': training_job_name}
                             ]
                         }
                     ]
@@ -176,9 +243,12 @@ class EC2TrainingOrchestrator:
             self.logger.info("Waiting for instance to be running...")
             waiter = self.ec2_client.get_waiter('instance_running')
             waiter.wait(InstanceIds=[instance_id])
+
+            # Wait for system and instance status checks to pass
+            self._wait_for_instance_status_ok(instance_id)
             
-            # Get instance details
-            instance_info = self._get_instance_info(instance_id)
+            # Get instance details (ensure we have a public IP)
+            instance_info = self._wait_for_public_ip(instance_id)
             
             # Store training job info
             self.training_instances[training_job_name] = {
@@ -189,6 +259,12 @@ class EC2TrainingOrchestrator:
                 'launch_time': time.time(),
                 'status': 'initializing'
             }
+            
+            # Also make sure SSH is reachable before returning
+            try:
+                self._wait_for_ssh(instance_info['public_ip'])
+            except Exception as e:
+                self.logger.warning(f"SSH not yet reachable but continuing: {e}")
             
             self.logger.info(f"Training instance ready: {instance_info['public_ip']}")
             return self.training_instances[training_job_name]
@@ -234,8 +310,12 @@ class EC2TrainingOrchestrator:
             # Wait for instance to be running
             waiter = self.ec2_client.get_waiter('instance_running')
             waiter.wait(InstanceIds=[instance_id])
+
+            # Wait for system and instance status checks to pass
+            self._wait_for_instance_status_ok(instance_id)
             
-            instance_info = self._get_instance_info(instance_id)
+            # Ensure public IP is available
+            instance_info = self._wait_for_public_ip(instance_id)
             
             self.gradio_instances['main'] = {
                 'instance_id': instance_id,
@@ -245,6 +325,12 @@ class EC2TrainingOrchestrator:
                 'status': 'initializing',
                 'gradio_url': f"http://{instance_info['public_ip']}:{self.config.gradio_config.port}"
             }
+            
+            # Warm up SSH reachability
+            try:
+                self._wait_for_ssh(instance_info['public_ip'])
+            except Exception as e:
+                self.logger.warning(f"SSH not yet reachable but continuing: {e}")
             
             self.logger.info(f"Gradio instance ready: {instance_info['public_ip']}")
             return self.gradio_instances['main']
@@ -257,6 +343,9 @@ class EC2TrainingOrchestrator:
                                local_project_path: str = ".") -> bool:
         """Deploy code to EC2 instance via SCP"""
         try:
+            # Wait for SSH to be reachable before attempting connection
+            self._wait_for_ssh(instance_info['public_ip'])
+
             # Create SSH client
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -281,7 +370,7 @@ class EC2TrainingOrchestrator:
                 
                 ssh_client.connect(
                     hostname=instance_info['public_ip'],
-                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    username='ubuntu',  # Ubuntu AMI uses ubuntu
                     pkey=private_key
                 )
             except Exception as e:
@@ -289,18 +378,18 @@ class EC2TrainingOrchestrator:
                 self.logger.warning(f"Failed to load key manually: {e}, trying key_filename method")
                 ssh_client.connect(
                     hostname=instance_info['public_ip'],
-                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    username='ubuntu',  # Ubuntu AMI uses ubuntu
                     key_filename=str(key_path)
                 )
             
             # Create base directory first
-            ssh_client.exec_command(f"mkdir -p /home/ec2-user/stranger-things-nlp")
+            ssh_client.exec_command(f"mkdir -p /home/ubuntu/stranger-things-nlp")
             
             # Upload project files
             sftp = ssh_client.open_sftp()
             
             local_path = Path(local_project_path)
-            remote_base = "/home/ec2-user/stranger-things-nlp"
+            remote_base = "/home/ubuntu/stranger-things-nlp"
             
             # Ensure remote base directory exists
             try:
@@ -311,7 +400,10 @@ class EC2TrainingOrchestrator:
             # Upload essential files
             essential_files = [
                 'requirements.txt',
+                '.env',                  # Add environment variables
                 'gradio_app.py',
+                'training_pipeline.py',  # Add training pipeline
+                'config.py',             # Add config file
                 'aws/',
                 'character_chatbot/',
                 'text_classification/',
@@ -333,12 +425,10 @@ class EC2TrainingOrchestrator:
             
             sftp.close()
             
-            # Install requirements
+            # Install requirements will be handled in training script
             commands = [
-                "cd /home/ec2-user/stranger-things-nlp",
-                "python3 -m venv venv",  # Create virtual environment first
-                "source venv/bin/activate",
-                "pip install -r requirements.txt"
+                "cd /home/ubuntu/stranger-things-nlp",
+                "echo 'Code deployed, venv will be created during training'"
             ]
             
             for cmd in commands:
@@ -353,8 +443,8 @@ class EC2TrainingOrchestrator:
             self.logger.error(f"Error deploying code: {e}")
             return False
     
-    def start_training(self, training_job_name: str, model_type: str = "llama") -> bool:
-        """Start training on EC2 instance"""
+    def start_training(self, training_job_name: str, model_type: str = "llama", stream_logs: bool = False, log_lines: int = 200, s3_transcripts_prefix: Optional[str] = None) -> bool:
+        """Start training on EC2 instance. If stream_logs is True, tail the training log live."""
         if training_job_name not in self.training_instances:
             self.logger.error(f"Training job not found: {training_job_name}")
             return False
@@ -362,6 +452,9 @@ class EC2TrainingOrchestrator:
         instance_info = self.training_instances[training_job_name]
         
         try:
+            # Ensure SSH is reachable
+            self._wait_for_ssh(instance_info['public_ip'])
+            
             # Create SSH client
             ssh_client = paramiko.SSHClient()
             ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -385,7 +478,7 @@ class EC2TrainingOrchestrator:
                 
                 ssh_client.connect(
                     hostname=instance_info['public_ip'],
-                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    username='ubuntu',  # Ubuntu AMI uses ubuntu
                     pkey=private_key
                 )
             except Exception as e:
@@ -393,7 +486,7 @@ class EC2TrainingOrchestrator:
                 self.logger.warning(f"Failed to load key manually: {e}, trying key_filename method")
                 ssh_client.connect(
                     hostname=instance_info['public_ip'],
-                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    username='ubuntu',  # Ubuntu AMI uses ubuntu
                     key_filename=str(key_path)
                 )
             
@@ -401,25 +494,38 @@ class EC2TrainingOrchestrator:
             env_vars = self.config.get_training_environment_vars()
             env_setup = " && ".join([f"export {k}={v}" for k, v in env_vars.items()])
             
-            # Start training command
+            # Determine S3 transcripts prefix; default to project's training transcripts path
+            s3_transcripts_prefix = s3_transcripts_prefix or 'data/training/transcripts/'
+            
+            # Start training command using the proper training pipeline
             training_script = f"""
-            cd /home/ec2-user/stranger-things-nlp
+            cd /home/ubuntu/stranger-things-nlp
+            
+            # Create and activate virtual environment
+            python3 -m venv venv
             source venv/bin/activate
+            
+            # Upgrade pip and install requirements
+            pip install --upgrade pip
+            # Install CUDA-enabled PyTorch for GPU instances
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+            pip install boto3 transformers datasets accelerate peft bitsandbytes trl huggingface_hub
+            
+            # Load environment variables and authenticate with HuggingFace
+            source .env
+            echo "Authenticating with HuggingFace..."
+            python -c "from huggingface_hub import login; import os; login(os.getenv('huggingface_token'))"
+            
             {env_setup}
             
-            python -c "
-            from character_chatbot.character_chatbot import CharacterChatbot
-            import os
+            # Verify GPU is available
+            python -c "import torch; print(f'CUDA Available: {{torch.cuda.is_available()}}'); print(f'GPU Count: {{torch.cuda.device_count()}}'); print(f'Current Device: {{torch.cuda.current_device() if torch.cuda.is_available() else \'CPU\'}}'); print(f'GPU Name: {{torch.cuda.get_device_name(0) if torch.cuda.is_available() else \'N/A\'}}')"
             
-            # Download training data from S3
-            # This would be implemented in the updated chatbot class
-            chatbot = CharacterChatbot(
-                model_path='christopherxzyx/StrangerThings_{model_type.title()}-3-4B_ec2',
-                data_path='/tmp/training_data/',
-                huggingface_token=os.getenv('HUGGINGFACE_TOKEN')
-            )
-            print('Training completed successfully')
-            "
+            # Use the proper training pipeline; fetch transcripts from S3
+            python training_pipeline.py --model-type {model_type} --s3-transcripts {s3_transcripts_prefix}
+            
+            # Log completion
+            echo "Training pipeline completed at $(date)" >> training.log
             """
             
             # Execute training in background
@@ -429,8 +535,35 @@ class EC2TrainingOrchestrator:
             # Update status
             self.training_instances[training_job_name]['status'] = 'training'
             
-            ssh_client.close()
             self.logger.info(f"Started training for job: {training_job_name}")
+            
+            if stream_logs:
+                # Stream logs live
+                tail_cmd = f"tail -n {log_lines} -F /home/ubuntu/stranger-things-nlp/training.log"
+                transport = ssh_client.get_transport()
+                channel = transport.open_session()
+                channel.exec_command(tail_cmd)
+                try:
+                    while True:
+                        if channel.recv_ready():
+                            data = channel.recv(4096).decode('utf-8', errors='replace')
+                            print(data, end='')
+                        if channel.recv_stderr_ready():
+                            err = channel.recv_stderr(4096).decode('utf-8', errors='replace')
+                            print(err, end='')
+                        if channel.exit_status_ready():
+                            break
+                        time.sleep(0.2)
+                except KeyboardInterrupt:
+                    self.logger.info("Log streaming interrupted by user")
+                finally:
+                    try:
+                        channel.close()
+                    except Exception:
+                        pass
+                    ssh_client.close()
+            else:
+                ssh_client.close()
             return True
             
         except Exception as e:
@@ -468,7 +601,7 @@ class EC2TrainingOrchestrator:
                 
                 ssh_client.connect(
                     hostname=instance_info['public_ip'],
-                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    username='ubuntu',  # Ubuntu AMI uses ubuntu
                     pkey=private_key
                 )
             except Exception as e:
@@ -476,13 +609,13 @@ class EC2TrainingOrchestrator:
                 self.logger.warning(f"Failed to load key manually: {e}, trying key_filename method")
                 ssh_client.connect(
                     hostname=instance_info['public_ip'],
-                    username='ec2-user',  # Amazon Linux 2 uses ec2-user
+                    username='ubuntu',  # Ubuntu AMI uses ubuntu
                     key_filename=str(key_path)
                 )
             
             # Start Gradio app
             gradio_command = f"""
-            cd /home/ec2-user/stranger-things-nlp
+            cd /home/ubuntu/stranger-things-nlp
             source venv/bin/activate
             
             export GRADIO_SERVER_NAME=0.0.0.0
@@ -521,11 +654,138 @@ class EC2TrainingOrchestrator:
         
         return self.training_instances[training_job_name]
     
+    def fetch_training_log(self, training_job_name: Optional[str] = None, model_type: Optional[str] = None, source: str = 'ssh', lines: int = 200) -> str:
+        """Fetch recent training.log content either via SSH or from S3.
+        If source='ssh', requires a running instance accessible via SSH.
+        If source='s3', attempts to find latest training.log in logs/{model_type}/.
+        Returns the log content as a string (may be partial)."""
+        try:
+            if source == 'ssh':
+                # If training_job_name specified and tracked, use its IP
+                ip = None
+                if training_job_name and training_job_name in self.training_instances:
+                    ip = self.training_instances[training_job_name].get('public_ip')
+                if not ip:
+                    # Fallback: find any running training instance and use its IP
+                    running = [i for i in self._find_active_training_instances() if i.get('public_ip')]
+                    if not running:
+                        return "No running training instances with public IP found for SSH log fetch."
+                    ip = running[0]['public_ip']
+                # Connect and tail last N lines (not following)
+                self._wait_for_ssh(ip)
+                ssh_client = paramiko.SSHClient()
+                ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                key_path = Path(f"~/.ssh/{self.config.ec2_config.key_pair_name}.pem").expanduser()
+                try:
+                    from paramiko import RSAKey, Ed25519Key, ECDSAKey
+                    private_key = None
+                    for key_class in [RSAKey, Ed25519Key, ECDSAKey]:
+                        try:
+                            private_key = key_class.from_private_key_file(str(key_path))
+                            break
+                        except Exception:
+                            continue
+                    if private_key is None:
+                        raise Exception(f"Could not load private key from {key_path}")
+                    ssh_client.connect(hostname=ip, username='ubuntu', pkey=private_key)
+                except Exception:
+                    ssh_client.connect(hostname=ip, username='ubuntu', key_filename=str(key_path))
+                stdin, stdout, stderr = ssh_client.exec_command(f"tail -n {lines} /home/ubuntu/stranger-things-nlp/training.log || echo 'training.log not found'" )
+                out = stdout.read().decode('utf-8', errors='replace')
+                err = stderr.read().decode('utf-8', errors='replace')
+                ssh_client.close()
+                return out if out.strip() else err
+            else:
+                # S3 mode: attempt to find latest training.log under logs/{model_type}/
+                if not model_type:
+                    # Try to infer from active instances
+                    actives = self._find_active_training_instances()
+                    if actives and actives[0].get('model_type'):
+                        model_type = actives[0]['model_type']
+                if not model_type:
+                    return "Model type not specified and could not infer for S3 log fetch."
+                prefix = f"logs/{model_type}/"
+                objs = self.s3_manager.list_objects(prefix)
+                if not objs:
+                    return f"No logs found in s3://{self.s3_manager.bucket_name}/{prefix}"
+                # Find latest training.log by LastModified
+                latest_key = None
+                latest_time = None
+                for obj in objs:
+                    key = obj['Key']
+                    if key.endswith('training.log'):
+                        lm = obj.get('LastModified')
+                        if latest_time is None or (lm and lm > latest_time):
+                            latest_time = lm
+                            latest_key = key
+                if not latest_key:
+                    return f"No training.log found under s3://{self.s3_manager.bucket_name}/{prefix}"
+                # Download to temp and read last N lines
+                import tempfile
+                import io
+                tmp = tempfile.NamedTemporaryFile(delete=False)
+                tmp.close()
+                ok = self.s3_manager.download_file(latest_key, tmp.name, show_progress=False)
+                if not ok:
+                    return f"Failed to download s3://{self.s3_manager.bucket_name}/{latest_key}"
+                with open(tmp.name, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.readlines()
+                return ''.join(content[-lines:])
+        except Exception as e:
+            return f"Error fetching training log: {e}"
+
     def list_instances(self) -> Dict:
-        """List all project instances"""
+        """List all project instances by querying AWS (project-tagged)."""
+        # Training instances (pending/running/stopping/stopped)
+        training_filters = [
+            {'Name': 'tag:Project', 'Values': ['stranger-things-nlp']},
+            {'Name': 'tag:Purpose', 'Values': ['training']},
+            {'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']},
+        ]
+        training_resp = self.ec2_client.describe_instances(Filters=training_filters)
+        training: Dict[str, Dict] = {}
+        for r in training_resp.get('Reservations', []):
+            for inst in r.get('Instances', []):
+                state = inst['State']['Name']
+                public_ip = inst.get('PublicIpAddress', '')
+                private_ip = inst.get('PrivateIpAddress', '')
+                tags = inst.get('Tags', [])
+                job_name = self._get_tag(tags, 'JobName') or inst['InstanceId']
+                model_type = self._get_tag(tags, 'ModelType') or self._infer_model_type_from_name(self._get_tag(tags, 'Name'))
+                training[job_name] = {
+                    'instance_id': inst['InstanceId'],
+                    'model_type': model_type,
+                    'public_ip': public_ip,
+                    'private_ip': private_ip,
+                    'status': state,
+                }
+        
+        # Gradio instances
+        gradio_filters = [
+            {'Name': 'tag:Project', 'Values': ['stranger-things-nlp']},
+            {'Name': 'tag:Purpose', 'Values': ['gradio-hosting']},
+            {'Name': 'instance-state-name', 'Values': ['pending', 'running', 'stopping', 'stopped']},
+        ]
+        gradio_resp = self.ec2_client.describe_instances(Filters=gradio_filters)
+        gradio: Dict[str, Dict] = {}
+        for r in gradio_resp.get('Reservations', []):
+            for inst in r.get('Instances', []):
+                state = inst['State']['Name']
+                public_ip = inst.get('PublicIpAddress', '')
+                private_ip = inst.get('PrivateIpAddress', '')
+                name = next((t['Value'] for t in inst.get('Tags', []) if t.get('Key') == 'Name'), inst['InstanceId'])
+                gradio_url = f"http://{public_ip}:{self.config.gradio_config.port}" if public_ip else ''
+                gradio[name] = {
+                    'instance_id': inst['InstanceId'],
+                    'public_ip': public_ip,
+                    'private_ip': private_ip,
+                    'status': state,
+                    'gradio_url': gradio_url,
+                }
+        
         return {
-            'training': self.training_instances,
-            'gradio': self.gradio_instances
+            'training': training,
+            'gradio': gradio,
         }
     
     def _wait_for_spot_instance(self, spot_request_id: str, timeout: int = 300) -> str:
@@ -560,6 +820,83 @@ class EC2TrainingOrchestrator:
             'private_ip': instance.get('PrivateIpAddress', ''),
             'state': instance['State']['Name']
         }
+
+    def _get_tag(self, tags: List[Dict], key: str) -> Optional[str]:
+        if not tags:
+            return None
+        for t in tags:
+            if t.get('Key') == key:
+                return t.get('Value')
+        return None
+
+    def _infer_model_type_from_name(self, name: Optional[str]) -> Optional[str]:
+        if not name:
+            return None
+        # Expected pattern: stranger-things-training-<model_type>
+        parts = name.split('-')
+        if len(parts) >= 4 and parts[0] == 'stranger' and parts[1] == 'things' and parts[2] == 'training':
+            return parts[3]
+        return None
+
+    def _find_active_training_instances(self) -> List[Dict]:
+        """Find active (pending/running) training instances for this project."""
+        filters = [
+            {'Name': 'tag:Project', 'Values': ['stranger-things-nlp']},
+            {'Name': 'tag:Purpose', 'Values': ['training']},
+            {'Name': 'instance-state-name', 'Values': ['pending', 'running']},
+        ]
+        resp = self.ec2_client.describe_instances(Filters=filters)
+        results: List[Dict] = []
+        for r in resp.get('Reservations', []):
+            for inst in r.get('Instances', []):
+                tags = inst.get('Tags', [])
+                results.append({
+                    'instance_id': inst['InstanceId'],
+                    'public_ip': inst.get('PublicIpAddress', ''),
+                    'private_ip': inst.get('PrivateIpAddress', ''),
+                    'state': inst['State']['Name'],
+                    'model_type': self._get_tag(tags, 'ModelType') or self._infer_model_type_from_name(self._get_tag(tags, 'Name'))
+                })
+        return results
+
+    def _wait_for_public_ip(self, instance_id: str, timeout: int = 300, interval: int = 5) -> Dict:
+        """Wait until the instance has a Public IP assigned and return instance info."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            info = self._get_instance_info(instance_id)
+            if info.get('public_ip'):
+                return info
+            time.sleep(interval)
+        raise TimeoutError(f"Timed out waiting for Public IP on instance {instance_id}")
+
+    def _wait_for_instance_status_ok(self, instance_id: str, timeout: int = 600, delay: int = 10):
+        """Wait for EC2 instance and system status checks to pass (Status=ok)."""
+        self.logger.info("Waiting for instance status checks to pass (Status=ok)...")
+        waiter = self.ec2_client.get_waiter('instance_status_ok')
+        max_attempts = max(1, timeout // delay)
+        waiter.wait(InstanceIds=[instance_id], WaiterConfig={'Delay': delay, 'MaxAttempts': max_attempts})
+
+    def _wait_for_ssh(self, host: str, port: int = 22, timeout: int = 600, interval: int = 5):
+        """Wait until TCP port 22 on host is reachable."""
+        self.logger.info(f"Waiting for SSH to be reachable at {host}:{port}...")
+        deadline = time.time() + timeout
+        last_err = None
+        while time.time() < deadline:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(interval)
+            try:
+                sock.connect((host, port))
+                sock.shutdown(socket.SHUT_RDWR)
+                return True
+            except Exception as e:
+                last_err = e
+                time.sleep(interval)
+            finally:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+        raise TimeoutError(f"Timed out waiting for SSH on {host}:{port}: {last_err}")
     
     def _get_gradio_user_data_script(self) -> str:
         """Get user data script for Gradio instance"""
@@ -568,8 +905,8 @@ class EC2TrainingOrchestrator:
         # Add Gradio-specific setup
         gradio_setup = """
 # Additional setup for Gradio hosting
-sudo -u ec2-user bash << 'EOF'
-cd /home/ec2-user/stranger-things-nlp
+sudo -u ubuntu bash << 'EOF'
+cd /home/ubuntu/stranger-things-nlp
 
 # Install nginx for reverse proxy (optional)
 # sudo yum install -y nginx  # Use yum for Amazon Linux

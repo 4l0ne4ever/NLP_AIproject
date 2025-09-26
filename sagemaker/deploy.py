@@ -113,7 +113,10 @@ class SageMakerDeploymentCLI:
             return False
     
     def train_model(self, model_type: str, data_path: str = None, 
-                   job_name: str = None, wait: bool = False):
+                   job_name: str = None, wait: bool = False,
+                   batch_size: int = None, learning_rate: float = None,
+                   max_steps: int = None, num_epochs: int = None,
+                   fp16: bool = None, base_model: str = None):
         """Launch a training job"""
         logger.info(f"Starting {model_type} model training...")
         
@@ -136,9 +139,24 @@ class SageMakerDeploymentCLI:
             
             # Set model-specific hyperparameters
             hyperparameters = {}
+            # Base model selection
             if model_type == "chatbot":
-                # Use Llama as default for chatbot
-                hyperparameters['base_model'] = 'meta-llama/Llama-3.2-3B-Instruct'
+                # Use Llama as default for chatbot unless overridden
+                hyperparameters['base_model'] = base_model or 'meta-llama/Llama-3.2-3B-Instruct'
+            elif base_model:
+                hyperparameters['base_model'] = base_model
+            
+            # Optional hyperparameters
+            if batch_size is not None:
+                hyperparameters['batch_size'] = batch_size
+            if learning_rate is not None:
+                hyperparameters['learning_rate'] = learning_rate
+            if max_steps is not None:
+                hyperparameters['max_steps'] = max_steps
+            if num_epochs is not None:
+                hyperparameters['num_epochs'] = num_epochs
+            if fp16 is not None:
+                hyperparameters['fp16'] = str(fp16).lower()
             
             # Launch training job
             job_arn = self.training_orchestrator.launch_training_job(
@@ -363,6 +381,13 @@ def main():
     train_parser.add_argument("--data-path", help="Local path to training data")
     train_parser.add_argument("--job-name", help="Custom training job name")
     train_parser.add_argument("--wait", action="store_true", help="Wait for training completion")
+    # Optional hyperparameters
+    train_parser.add_argument("--batch-size", type=int, help="Training batch size")
+    train_parser.add_argument("--learning-rate", type=float, help="Learning rate")
+    train_parser.add_argument("--max-steps", type=int, help="Max training steps")
+    train_parser.add_argument("--num-epochs", type=int, help="Number of epochs")
+    train_parser.add_argument("--fp16", action="store_true", help="Enable fp16 training")
+    train_parser.add_argument("--base-model", type=str, help="Base model name (e.g., meta-llama/Llama-3.2-3B-Instruct)")
     
     # Deploy command
     deploy_parser = subparsers.add_parser("deploy", help="Deploy model to endpoint")
@@ -410,7 +435,13 @@ def main():
             model_type=args.model_type,
             data_path=args.data_path,
             job_name=args.job_name,
-            wait=args.wait
+            wait=args.wait,
+            batch_size=args.batch_size,
+            learning_rate=args.learning_rate,
+            max_steps=args.max_steps,
+            num_epochs=args.num_epochs,
+            fp16=args.fp16,
+            base_model=args.base_model
         )
         return 0 if job_name else 1
     

@@ -1,3 +1,309 @@
+# Project Directory Structure - EC2/S3 Deployment
+
+Complete directory structure for the Stranger Things AI Analysis Suite using EC2/S3 architecture.
+
+## Root Directory Structure
+
+```
+stranger-things-ai-analysis-suite/
+├── README.md                     # Main project documentation
+├── PROJECT_GUIDE.md             # Comprehensive project guide
+├── README_gradio_v2.md          # Gradio application documentation
+├── requirements.txt             # Python dependencies
+├── .env                        # Environment variables (not in git)
+├── .env.example               # Environment template
+├── .gitignore                # Git ignore rules
+│
+├── gradio_app_v2.py          # Main Gradio application with fallback announcements
+├── training_pipeline.py      # Model training and S3 upload pipeline
+├── deploy_aws.py             # AWS deployment orchestrator
+├── config.py                 # Main configuration file
+├── aws_config.yaml          # AWS-specific configuration
+│
+├── aws/                     # AWS infrastructure management
+│   ├── __init__.py
+│   ├── config.py           # AWS configuration manager
+│   ├── ec2_manager.py      # EC2 instance management
+│   ├── ec2_orchestrator.py # EC2 orchestration and lifecycle
+│   └── storage.py          # S3 storage management
+│
+├── data/                   # Training and application data
+│   ├── transcripts/       # CSV transcript files (10,924+ samples)
+│   │   ├── transcriptS01E01.csv
+│   │   ├── transcriptS01E02.csv
+│   │   ├── ...
+│   │   └── transcriptS04E09.csv
+│   ├── subtitles/         # SRT subtitle files (backup)
+│   │   ├── Stranger.Things.S01E01.WEBRip.x264-TURBO.srt
+│   │   ├── ...
+│   │   └── Stranger.Things.S04E09.NF.WEB-DL.HI.srt
+│   ├── characters.jsonl   # Character information
+│   ├── locations.jsonl    # Location data
+│   └── themes.json        # Theme definitions
+│
+├── character_chatbot/     # Character chatbot implementations
+│   ├── __init__.py
+│   ├── character_chatbot.py      # LLaMA-based chatbot
+│   ├── character_chatbotQwen.py  # Qwen-based chatbot
+│   ├── character_chatbot_s3.py   # S3-integrated chatbot
+│   ├── evaluate.py              # Model evaluation
+│   ├── review.py                # Performance review
+│   └── bleuScore.py            # BLEU score calculation
+│
+├── theme_classifier/      # Theme classification module
+│   ├── __init__.py
+│   └── theme_classifier.py
+│
+├── character_network/     # Character network analysis
+│   ├── __init__.py
+│   ├── named_entity_recognizer.py
+│   └── network_generator.py
+│
+├── text_classification/   # Location classification module
+│   ├── __init__.py
+│   ├── location_classifier.py
+│   ├── custom_trainer.py
+│   └── training_utils.py
+│
+├── utils/                 # Utility functions
+│   ├── __init__.py
+│   ├── data_processing.py
+│   ├── model_utils.py
+│   └── visualization.py
+│
+├── architecture/          # Architecture documentation
+│   ├── ARCHITECTURE_EC2_S3.md
+│   └── DIRECTORY_TREE_EC2_S3.md
+│
+├── tests/                 # Test files
+│   ├── __init__.py
+│   ├── test_models.py
+│   ├── test_deployment.py
+│   └── test_data_processing.py
+│
+├── scripts/               # Utility scripts
+│   ├── setup_environment.sh
+│   ├── backup_models.sh
+│   └── cleanup_resources.sh
+│
+├── logs/                  # Local log files
+│   ├── training.log
+│   ├── deployment.log
+│   └── gradio.log
+│
+└── venv/                  # Virtual environment (not in git)
+    ├── bin/
+    ├── lib/
+    └── ...
+```
+
+## Key Files Description
+
+### Core Application Files
+
+#### `gradio_app_v2.py`
+- Main Gradio web application
+- Implements fallback announcement system
+- Provides user interface for all NLP features
+- Handles model loading from S3 with HuggingFace fallbacks
+
+#### `training_pipeline.py`
+- End-to-end model training pipeline
+- Processes transcript CSV files
+- Fine-tunes models using LoRA
+- Uploads trained models to S3 with metadata
+
+#### `deploy_aws.py`
+- AWS deployment orchestration
+- Commands for infrastructure management
+- Training instance lifecycle management
+- Gradio app deployment automation
+
+#### `config.py`
+- Main configuration settings
+- Model paths and fallback configurations
+- Training parameters
+- Gradio settings
+
+### AWS Infrastructure
+
+#### `aws/ec2_orchestrator.py`
+- High-level EC2 instance management
+- Training and hosting instance coordination
+- Code deployment to instances
+- Instance lifecycle management
+
+#### `aws/ec2_manager.py`
+- Low-level EC2 operations
+- Instance creation and termination
+- Security group management
+- SSH and networking configuration
+
+#### `aws/storage.py`
+- S3 storage operations
+- Model upload and download
+- Data management
+- Bucket structure maintenance
+
+#### `aws/config.py`
+- AWS configuration management
+- EC2 instance specifications
+- S3 bucket settings
+- Training environment setup
+
+### Data Structure
+
+#### `data/transcripts/`
+- CSV files with dialogue data
+- Format: `name,line` columns
+- 10,924+ dialogue samples across 4 seasons
+- Primary training data source
+
+#### `data/subtitles/`
+- Original SRT subtitle files
+- Backup data source
+- Used for alternative processing approaches
+
+### Model Components
+
+#### `character_chatbot/`
+- **`character_chatbot.py`**: LLaMA-based implementation
+- **`character_chatbotQwen.py`**: Qwen-based implementation
+- **`character_chatbot_s3.py`**: S3-integrated version
+- **`evaluate.py`**: Model performance evaluation
+- **`bleuScore.py`**: BLEU score calculation for dialogue quality
+
+#### `theme_classifier/`
+- Zero-shot theme classification
+- Customizable theme categories
+- Integration with Gradio interface
+
+#### `character_network/`
+- Named entity recognition
+- Character relationship mapping
+- Network visualization generation
+
+#### `text_classification/`
+- Location classification functionality
+- Custom trainer implementations
+- Fine-tuned model support
+
+## S3 Bucket Structure
+
+Corresponding S3 bucket organization:
+
+```
+s3://stranger-things-nlp-bucket/
+├── models/
+│   └── trained/
+│       ├── llama/
+│       │   ├── latest.json              # Model metadata
+│       │   ├── 20241224-143022/        # Timestamped model version
+│       │   │   ├── config.json
+│       │   │   ├── pytorch_model.bin
+│       │   │   ├── tokenizer.json
+│       │   │   └── training_args.json
+│       │   └── 20241224-150315/        # Another model version
+│       └── qwen/
+│           ├── latest.json
+│           └── 20241224-145530/
+│
+├── checkpoints/                        # Training checkpoints
+│   ├── llama/
+│   └── qwen/
+│
+├── data/
+│   ├── training/
+│   │   ├── transcripts/                 # Uploaded transcript files
+│   │   └── processed/                   # Processed training data
+│   ├── evaluation/                      # Evaluation datasets
+│   └── raw/                            # Raw data backups
+│
+├── logs/
+│   ├── llama/                          # Training logs by model type
+│   └── qwen/
+│
+└── results/
+    ├── evaluations/                    # Model evaluation results
+    ├── metrics/                        # Performance metrics
+    └── reports/                        # Training and deployment reports
+```
+
+## Environment Configuration
+
+### `.env` File Structure
+```env
+# HuggingFace Configuration
+huggingface_token=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+
+# AWS Configuration (optional if using aws configure)
+AWS_ACCESS_KEY_ID=AKIAXXXXXXXXXXXXXXXX
+AWS_SECRET_ACCESS_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+AWS_DEFAULT_REGION=us-east-1
+
+# Custom S3 Bucket (optional override)
+S3_BUCKET_NAME=stranger-things-nlp-bucket
+
+# Application Settings
+GRADIO_DEBUG=true
+TRAINING_CACHE_DIR=/tmp/stranger_things_models
+```
+
+### `aws_config.yaml` Structure
+```yaml
+ec2:
+  ami_id: ami-0c02fb55956c7d316
+  instance_type: g4dn.xlarge
+  key_pair_name: stranger-things-key
+  region: us-east-1
+  use_spot_instances: false
+  max_spot_price: 0.5
+  volume_size: 100
+  volume_type: gp3
+
+s3:
+  bucket_name: stranger-things-nlp-bucket
+  region: us-east-1
+  model_prefix: models/
+  training_data_prefix: data/training/
+
+training:
+  base_model_llama: meta-llama/Llama-3.2-3B-Instruct
+  base_model_qwen: Qwen/Qwen2.5-3B-Instruct
+  batch_size: 1
+  learning_rate: 0.0002
+  max_steps: 1000
+```
+
+## Development Workflow
+
+### Local Development
+1. Clone repository
+2. Set up virtual environment: `python -m venv venv`
+3. Install dependencies: `pip install -r requirements.txt`
+4. Configure environment: Copy `.env.example` to `.env`
+5. Run locally: `python gradio_app_v2.py`
+
+### AWS Deployment
+1. Initialize AWS: `python deploy_aws.py init`
+2. Upload data: `python deploy_aws.py upload-data`
+3. Train models: `python deploy_aws.py train llama`
+4. Deploy app: `python deploy_aws.py deploy-gradio`
+
+### Model Training
+1. Data preprocessing from transcript CSV files
+2. Model fine-tuning using LoRA on EC2 GPU instances
+3. Automatic model upload to S3 with versioning
+4. Metadata generation and storage
+
+### Application Deployment
+1. Gradio app deployment to EC2 hosting instance
+2. Automatic model loading from S3
+3. Fallback to HuggingFace models when needed
+4. Real-time status monitoring and announcements
+
+This structure provides a clean separation of concerns with clear organization for development, deployment, and maintenance of the Stranger Things AI Analysis Suite.
+
 # Directory Tree - EC2/S3 Version
 
 ## Overview

@@ -41,10 +41,19 @@ def parse_args():
     parser.add_argument("--base_model", type=str, default="microsoft/DialoGPT-medium")
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=2e-4)
-    parser.add_argument("--max_steps", type=int, default=20)  # Reduced for CPU
+    parser.add_argument("--max_steps", type=int, default=20)  # Reduced for CPU/demo
     parser.add_argument("--num_epochs", type=int, default=1)
     parser.add_argument("--fp16", type=str, default="false")
     parser.add_argument("--huggingface_token", type=str, default="")
+
+    # S3 upload configuration (passed via hyperparameters)
+    parser.add_argument("--s3_bucket", type=str, default=os.environ.get("SM_S3_BUCKET", ""))
+    parser.add_argument("--s3_region", type=str, default=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+    parser.add_argument("--checkpoints_prefix", type=str, default="checkpoints/")
+    parser.add_argument("--logs_prefix", type=str, default="logs/")
+    parser.add_argument("--processed_prefix", type=str, default="data/processed/")
+    parser.add_argument("--models_prefix", type=str, default="models/")
+    parser.add_argument("--job_name", type=str, default=os.environ.get("TRAINING_JOB_NAME", ""))
     
     return parser.parse_args()
 
@@ -109,6 +118,18 @@ def prepare_dataset(df, tokenizer, max_length=512):
     
     return tokenized_dataset
 
+def _upload_directory_to_s3(local_dir, bucket, s3_prefix, region):
+    """Recursively upload a local directory to S3 under s3_prefix"""
+    import boto3, os
+    s3 = boto3.client('s3', region_name=region)
+    for root, _, files in os.walk(local_dir):
+        for fname in files:
+            local_path = os.path.join(root, fname)
+            rel = os.path.relpath(local_path, start=local_dir)
+            key = f"{s3_prefix.rstrip('/')}/{rel}".replace("\\", "/")
+            s3.upload_file(local_path, bucket, key)
+
+
 def main():
     """Main training function"""
     args = parse_args()
@@ -128,6 +149,22 @@ def main():
     # Load and prepare data
     training_df = load_training_data(args.train)
     train_dataset = prepare_dataset(training_df, tokenizer)
+
+    # Save a processed copy of the dataset (CSV) for auditability
+    try:
+        import tempfile
+        import pandas as pd
+        with tempfile.TemporaryDirectory() as tmpdir:
+            processed_path = os.path.join(tmpdir, "training_data_processed.csv")
+            # If training_df is already a DataFrame
+            training_df.to_csv(processed_path, index=False)
+            if args.s3_bucket:
+                run_id = args.job_name or str(int(time.time()))
+                s3_prefix = f"{args.processed_prefix.rstrip('/')}/{run_id}"
+                _upload_directory_to_s3(tmpdir, args.s3_bucket, s3_prefix, args.s3_region)
+                logger.info(f"Uploaded processed dataset to s3://{args.s3_bucket}/{s3_prefix}")
+    except Exception as e:
+        logger.warning(f"Failed to upload processed dataset: {e}")
     
     # Set up training arguments
     training_args = TrainingArguments(
@@ -180,6 +217,29 @@ def main():
     
     with open(os.path.join(args.model_dir, "training_info.json"), "w") as f:
         json.dump(training_info, f, indent=2)
+
+    # Upload checkpoints and logs to S3 (in addition to SageMaker model artifacts)
+    try:
+        if args.s3_bucket:
+            run_id = args.job_name or str(int(time.time()))
+            # Upload checkpoints (checkpoint-* folders inside model_dir)
+            ckpt_root = args.model_dir
+            ckpt_prefix = f"{args.checkpoints_prefix.rstrip('/')}/{run_id}"
+            # Only upload checkpoint directories/files
+            import glob
+            checkpoint_dirs = [p for p in glob.glob(os.path.join(ckpt_root, "checkpoint-*")) if os.path.isdir(p)]
+            if checkpoint_dirs:
+                for d in checkpoint_dirs:
+                    _upload_directory_to_s3(d, args.s3_bucket, ckpt_prefix + '/' + os.path.basename(d), args.s3_region)
+                logger.info(f"Uploaded checkpoints to s3://{args.s3_bucket}/{ckpt_prefix}")
+            # Upload logs directory
+            logs_dir = os.path.join(args.model_dir, "logs")
+            if os.path.isdir(logs_dir):
+                logs_prefix = f"{args.logs_prefix.rstrip('/')}/{run_id}"
+                _upload_directory_to_s3(logs_dir, args.s3_bucket, logs_prefix, args.s3_region)
+                logger.info(f"Uploaded logs to s3://{args.s3_bucket}/{logs_prefix}")
+    except Exception as e:
+        logger.warning(f"Failed to upload checkpoints/logs: {e}")
     
     logger.info("Training completed successfully!")
 

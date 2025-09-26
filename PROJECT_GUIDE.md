@@ -1,3 +1,420 @@
+# Stranger Things AI Analysis Suite - Project Guide
+
+Comprehensive guide for understanding, developing, and deploying the Stranger Things AI Analysis Suite.
+
+## Table of Contents
+
+1. [Project Overview](#project-overview)
+2. [System Architecture](#system-architecture)
+3. [Component Details](#component-details)
+4. [Deployment Workflow](#deployment-workflow)
+5. [Development Guide](#development-guide)
+6. [Configuration Reference](#configuration-reference)
+7. [Troubleshooting](#troubleshooting)
+
+## Project Overview
+
+### Purpose
+This project creates an intelligent NLP application that analyzes Stranger Things content using custom-trained AI models with smart fallback capabilities to HuggingFace models.
+
+### Key Innovations
+- **Smart Model Management**: Automatically loads custom models from S3, falls back to HuggingFace when needed
+- **Configurable Fallback Announcements**: Notifies users when fallback models are being used
+- **Comprehensive Training Pipeline**: End-to-end training from transcript data to deployed models
+- **AWS Integration**: Full cloud deployment with EC2 training and S3 model storage
+
+## System Architecture
+
+### High-Level Flow
+```
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│ Data Processing │ ──► │   Model Training │ ──► │  Model Storage  │
+│  (Transcripts)  │    │   (EC2 Instances) │    │      (S3)       │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+                                                         │
+                                                         ▼
+┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
+│ User Interface  │ ◄── │ Model Management │ ◄── │ Fallback Models │
+│   (Gradio)      │    │    (S3 + HF)     │    │ (HuggingFace)   │
+└─────────────────┘    └──────────────────┘    └─────────────────┘
+```
+
+### Component Interaction
+- **Training Pipeline**: Processes transcript data → Trains models → Uploads to S3
+- **Model Manager**: Checks S3 for trained models → Falls back to HuggingFace if needed
+- **Gradio App**: Provides user interface → Uses model manager for inference
+- **AWS Orchestrator**: Manages EC2 instances and S3 storage
+
+## Component Details
+
+### Core Application (`gradio_app_v2.py`)
+- **Purpose**: Main user interface with fallback announcement system
+- **Features**:
+  - Character chatbots (LLaMA and Qwen)
+  - Theme classification
+  - Character network analysis
+  - Location classification
+  - Real-time model status display
+  - Configurable fallback announcements
+
+### Training Pipeline (`training_pipeline.py`)
+- **Purpose**: End-to-end model training and S3 upload
+- **Process**:
+  1. Loads transcript CSV files from `data/transcripts/` (locally) or downloads them from S3 when invoked by the EC2 orchestrator using `--s3-transcripts`
+  2. Preprocesses 10,924+ dialogue samples and uploads the processed dataset to S3 (`data/processed/{run_id}/training_data.json`)
+  3. Fine-tunes models using LoRA (with logs to `output_dir/logs`)
+  4. Uploads checkpoints (`checkpoints/{model_type}/{run_id}/`), logs (`logs/{model_type}/{run_id}/`), and the merged final model (`models/trained/{model_type}/{run_id}/`) to S3; updates `latest.json`
+- **Supported Models**: LLaMA, Qwen
+
+### AWS Deployment (`deploy_aws.py`)
+- **Purpose**: Complete AWS deployment orchestration
+- **Commands**:
+  - `init`: Initialize AWS configuration
+  - `upload-data`: Upload training data to S3
+  - `train <model>`: Launch EC2 training instance
+  - `deploy-gradio`: Deploy Gradio app to EC2
+  - `status`: Show overall project status
+  - `list-instances`: List running instances
+
+### AWS Infrastructure (`aws/`)
+- **`ec2_orchestrator.py`**: Manages EC2 instance lifecycle
+- **`ec2_manager.py`**: Low-level EC2 operations
+- **`storage.py`**: S3 storage management
+- **`config.py`**: AWS configuration management
+
+### Model Components
+- **`character_chatbot/`**: LLaMA and Qwen chatbot implementations
+- **`theme_classifier/`**: Zero-shot theme classification
+- **`character_network/`**: Relationship network analysis
+- **`text_classification/`**: Location classification
+
+## Deployment Workflow
+
+### Phase 1: Initial Setup
+```bash
+# 1. Environment setup
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 2. AWS configuration
+aws configure
+python deploy_aws.py init
+
+# 3. Environment variables
+cp .env.example .env
+# Edit .env with HuggingFace token
+```
+
+### Phase 2: Data and Training
+```bash
+# 1. Upload training data (transcript files)
+python deploy_aws.py upload-data
+
+# 2. Train models (automatically saves to S3)
+python deploy_aws.py train llama    # ~2-3 hours
+python deploy_aws.py train qwen     # ~2-3 hours
+```
+
+### Phase 3: Application Deployment
+```bash
+# 1. Deploy Gradio app to EC2
+python deploy_aws.py deploy-gradio
+
+# 2. Monitor deployment
+python deploy_aws.py status
+
+# 3. Access application
+# URL will be provided in deployment output
+```
+
+### Phase 4: Local Development (Optional)
+```bash
+# Run locally with fallback models during training
+python gradio_app_v2.py
+```
+
+## Development Guide
+
+### Adding New Models
+
+1. **Create Model Class**:
+```python
+# In appropriate module directory
+class NewModelChatbot:
+    def __init__(self, model_path, huggingface_token):
+        # Implementation
+        pass
+    
+    def chat(self, message, history):
+        # Implementation
+        return response
+```
+
+2. **Update Configuration**:
+```python
+# In config.py
+FALLBACK_MODELS["new_model"] = "huggingface/model-name"
+S3_MODEL_PATHS["new_model"] = "models/trained/new_model/"
+```
+
+3. **Update Training Pipeline**:
+```python
+# In training_pipeline.py
+elif self.model_type == "new_model":
+    model = NewModelChatbot(
+        self.base_model_name or "default/model",
+        huggingface_token=os.getenv('huggingface_token')
+    )
+```
+
+### Modifying Fallback Behavior
+
+1. **Update Configuration**:
+```python
+# In config.py
+FALLBACK_CONFIG = {
+    "announce_fallback": True,
+    "fallback_message": "Custom message for {model_type}",
+    "log_fallbacks": True,  # New option
+    "max_logged_messages": 5  # New option
+}
+```
+
+2. **Update Announcement Function**:
+```python
+# In gradio_app_v2.py
+def announce_fallback(model_type):
+    # Custom logic here
+    pass
+```
+
+### Adding New UI Features
+
+1. **Create Processing Function**:
+```python
+def new_feature_function(input_data):
+    # Process input
+    return result
+```
+
+2. **Add to Gradio Interface**:
+```python
+# In gradio_app_v2.py main() function
+with gr.TabItem("New Feature"):
+    with gr.Row():
+        input_component = gr.Textbox()
+        output_component = gr.Textbox()
+        process_btn = gr.Button("Process")
+    
+    process_btn.click(new_feature_function, inputs=input_component, outputs=output_component)
+```
+
+## Configuration Reference
+
+### Main Configuration (`config.py`)
+
+```python
+# S3 Settings
+S3_BUCKET_NAME = "your-bucket-name"
+S3_REGION = "us-east-1"
+LOCAL_MODEL_CACHE = "/tmp/stranger_things_models"
+
+# Model Paths
+S3_MODEL_PATHS = {
+    "llama": "models/trained/llama/",
+    "qwen": "models/trained/qwen/"
+}
+
+# Fallback Models
+FALLBACK_MODELS = {
+    "llama": "christopherxzyx/StrangerThings_Llama-3-8B_v3",
+    "qwen": "christopherxzyx/StrangerThings_Qwen-3-4B"
+}
+
+# Fallback Configuration
+FALLBACK_CONFIG = {
+    "announce_fallback": True,
+    "fallback_message": "Notice: Using HuggingFace fallback for {model_type}"
+}
+
+# Training Configuration
+TRAINING_CONFIG = {
+    "batch_size": 4,
+    "learning_rate": 2e-5,
+    "num_epochs": 3,
+    "max_length": 512,
+    "warmup_steps": 100
+}
+
+# Gradio Configuration
+GRADIO_CONFIG = {
+    "server_name": "0.0.0.0",
+    "server_port": 7860,
+    "share": True,
+    "debug": True
+}
+```
+
+### AWS Configuration (`aws_config.yaml`)
+
+```yaml
+ec2:
+  ami_id: ami-0c02fb55956c7d316
+  instance_type: g4dn.xlarge
+  key_pair_name: your-key-pair
+  region: us-east-1
+  use_spot_instances: false
+  max_spot_price: 0.5
+  volume_size: 100
+
+s3:
+  bucket_name: your-bucket-name
+  region: us-east-1
+  model_prefix: models/
+  training_data_prefix: data/training/
+
+training:
+  base_model_llama: meta-llama/Llama-3.2-3B-Instruct
+  base_model_qwen: Qwen/Qwen2.5-3B-Instruct
+  batch_size: 1
+  learning_rate: 0.0002
+  max_steps: 1000
+```
+
+### Environment Variables (`.env`)
+
+```env
+# Required
+huggingface_token=your_hf_token_here
+
+# Optional (if not using aws configure)
+AWS_ACCESS_KEY_ID=your_access_key
+AWS_SECRET_ACCESS_KEY=your_secret_key
+AWS_DEFAULT_REGION=us-east-1
+
+# Optional overrides
+S3_BUCKET_NAME=custom-bucket-name
+```
+
+## Monitoring and Debugging
+
+### Training Monitoring
+
+```bash
+# Check training progress
+ssh -i ~/.ssh/your-key.pem ubuntu@<instance-ip>
+tail -f /home/ubuntu/stranger-things-nlp/training.log
+
+# Monitor system resources
+htop
+nvidia-smi
+```
+
+### Application Monitoring
+
+```bash
+# Check Gradio app logs
+ssh -i ~/.ssh/your-key.pem ec2-user@<instance-ip>
+tail -f /home/ec2-user/stranger-things-nlp/gradio.log
+
+# Check model status in app
+# Visit the "Model Status" section in Gradio interface
+```
+
+### S3 Model Verification
+
+```bash
+# List trained models
+aws s3 ls s3://your-bucket/models/trained/ --recursive
+
+# Check model info
+aws s3 cp s3://your-bucket/models/trained/llama/latest.json .
+cat latest.json
+```
+
+## Troubleshooting
+
+### Common Issues
+
+#### 1. Training Fails to Start
+```bash
+# Check EC2 instance status
+python deploy_aws.py list-instances
+
+# SSH into instance and check logs
+ssh -i ~/.ssh/your-key.pem ubuntu@<instance-ip>
+ls -la /home/ubuntu/stranger-things-nlp/
+cat /home/ubuntu/stranger-things-nlp/training.log
+```
+
+#### 2. Models Not Loading from S3
+```bash
+# Verify S3 permissions
+aws s3 ls s3://your-bucket/models/trained/
+
+# Check model info files
+aws s3 cp s3://your-bucket/models/trained/llama/latest.json .
+```
+
+#### 3. Fallback Models Not Working
+```bash
+# Verify HuggingFace token
+cat .env | grep huggingface_token
+
+# Test token manually
+python -c "from huggingface_hub import login; login('your_token_here')"
+```
+
+#### 4. Gradio App Not Accessible
+```bash
+# Check security group settings
+# Ensure port 7860 is open in EC2 security group
+
+# Check if app is running
+ssh -i ~/.ssh/your-key.pem ubuntu@<instance-ip>
+ps aux | grep python
+```
+
+### Performance Optimization
+
+#### Training Performance
+- Use GPU instances (g4dn.xlarge recommended)
+- Adjust batch size based on available memory
+- Enable gradient checkpointing for larger models
+- Use spot instances for cost savings
+
+#### Inference Performance
+- Cache models locally to reduce S3 download times
+- Use smaller instances for hosting (t3.medium sufficient)
+- Enable model quantization if supported
+- Implement response caching for common queries
+
+### Cost Optimization
+
+#### Training Costs
+- Use spot instances (up to 70% savings)
+- Terminate instances when not in use
+- Monitor training progress to avoid overtraining
+- Use appropriate instance sizes
+
+#### Storage Costs
+- Use S3 Intelligent Tiering
+- Clean up old model versions periodically
+- Compress model files where possible
+- Use lifecycle policies for automated cleanup
+
+## Additional Resources
+
+- [AWS EC2 Documentation](https://docs.aws.amazon.com/ec2/)
+- [Gradio Documentation](https://gradio.app/docs/)
+- [HuggingFace Transformers](https://huggingface.co/docs/transformers/)
+- [PyTorch Documentation](https://pytorch.org/docs/)
+
+---
+
+**Need Help?** Check the troubleshooting section or review the component-specific documentation in each module directory.
+
 # Stranger Things NLP - Complete Project Guide
 
 **Comprehensive Guide for Character Chatbot Development and AWS Deployment**

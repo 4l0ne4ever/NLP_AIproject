@@ -17,7 +17,7 @@ endpoint:
 s3:
   batch_input_path: batch-input/
   batch_output_path: batch-output/
-  bucket_name: stranger-things-sagemaker-159182460041
+  bucket_name: stranger-things-sagemaker-duongcongthuyet
   checkpoints_path: checkpoints/
   data_capture_path: data-capture/
   model_artifacts_path: models/
@@ -26,7 +26,7 @@ s3:
   training_data_path: data/training/
 training:
   base_job_name: stranger-things
-  checkpoint_s3_uri: s3://stranger-things-sagemaker/checkpoints/
+  checkpoint_s3_uri: s3://stranger-things-sagemaker-duongcongthuyet/checkpoints/
   distribution_type: data_parallel
   enable_checkpointing: true
   enable_distributed_training: false
@@ -44,10 +44,10 @@ training:
     num_epochs: '3'
   input_mode: File
   instance_count: 1
-  instance_type: ml.m5.large
+  instance_type: ml.g4dn.xlarge
   max_runtime_seconds: 86400
-  output_path: s3://stranger-things-sagemaker/models/
+  output_path: s3://stranger-things-sagemaker-duongcongthuyet/models/
   python_version: py310
   role_arn: arn:aws:iam::159182460041:role/SageMakerExecutionRole
-  training_image: 763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-training:2.0.1-cpu-py310-ubuntu20.04-sagemaker
+  training_image: 763104351884.dkr.ecr.us-east-1.amazonaws.com/pytorch-training:2.0.1-gpu-py310-cu118-ubuntu20.04-sagemaker
   volume_size_gb: 100

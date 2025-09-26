@@ -132,7 +132,11 @@ class AWSDeploymentCLI:
                 # Start training
                 print("Starting training process...")
                 training_started = self.ec2_orchestrator.start_training(
-                    training_job_name, model_type.lower()
+                    training_job_name,
+                    model_type.lower(),
+                    stream_logs=getattr(self, '_stream_logs', False),
+                    log_lines=getattr(self, '_log_lines', 200),
+                    s3_transcripts_prefix=getattr(self, '_s3_transcripts', None)
                 )
                 
                 if training_started:
@@ -268,6 +272,9 @@ def main():
     # Training command
     train_parser = subparsers.add_parser('train', help='Start model training')
     train_parser.add_argument('model', choices=['llama', 'qwen'], help='Model type to train')
+    train_parser.add_argument('--stream-logs', action='store_true', help='Stream training logs to the terminal')
+    train_parser.add_argument('--log-lines', type=int, default=200, help='Number of log lines to show when streaming (default: 200)')
+    train_parser.add_argument('--s3-transcripts', type=str, help='S3 prefix for transcripts (e.g., data/training/transcripts/)')
     
     # Gradio deployment command
     subparsers.add_parser('deploy-gradio', help='Deploy Gradio app')
@@ -282,7 +289,12 @@ def main():
     subparsers.add_parser('upload-data', help='Upload training data to S3')
     
     # Status command
-    subparsers.add_parser('status', help='Show overall project status')
+    status_parser = subparsers.add_parser('status', help='Show overall project status')
+    status_parser.add_argument('--logs', action='store_true', help='Fetch and show recent training.log')
+    status_parser.add_argument('--source', choices=['ssh', 's3'], default='s3', help='Where to fetch logs from (default: s3)')
+    status_parser.add_argument('--model', choices=['llama', 'qwen'], help='Model type for S3 logs (if source=s3)')
+    status_parser.add_argument('--job', help='Training job name (if source=ssh)')
+    status_parser.add_argument('--lines', type=int, default=200, help='Number of log lines to show (default: 200)')
     
     args = parser.parse_args()
     
@@ -304,6 +316,10 @@ def main():
     
     # Execute commands
     if args.command == 'train':
+        # Store stream flags on cli to pass into orchestrator call
+        cli._stream_logs = bool(getattr(args, 'stream_logs', False))
+        cli._log_lines = int(getattr(args, 'log_lines', 200))
+        cli._s3_transcripts = getattr(args, 's3_transcripts', None)
         cli.start_training(args.model)
     elif args.command == 'deploy-gradio':
         cli.deploy_gradio()
@@ -315,6 +331,16 @@ def main():
         cli.upload_data()
     elif args.command == 'status':
         cli.show_status()
+        # Optionally fetch logs
+        if getattr(args, 'logs', False):
+            print("\nRecent training.log:\n" + ("-"*50))
+            content = cli.ec2_orchestrator.fetch_training_log(
+                training_job_name=getattr(args, 'job', None),
+                model_type=getattr(args, 'model', None),
+                source=getattr(args, 'source', 's3'),
+                lines=int(getattr(args, 'lines', 200))
+            )
+            print(content if content else "(no content)")
 
 if __name__ == "__main__":
     main()

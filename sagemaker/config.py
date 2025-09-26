@@ -96,13 +96,16 @@ class SageMakerEndpointConfig:
 @dataclass
 class SageMakerS3Config:
     """S3 configuration specific to SageMaker"""
-    bucket_name: str = "stranger-things-sagemaker"
+    # Use a separate bucket from EC2 to avoid collisions
+    bucket_name: str = "stranger-things-sagemaker-duongcongthuyet"
     region: str = "us-east-1"
     
     # SageMaker-specific S3 paths
     training_data_path: str = "data/training/"
+    processed_data_path: str = "data/processed/"
     model_artifacts_path: str = "models/"
     checkpoints_path: str = "checkpoints/"
+    logs_path: str = "logs/"
     batch_input_path: str = "batch-input/"
     batch_output_path: str = "batch-output/"
     data_capture_path: str = "data-capture/"
@@ -204,8 +207,10 @@ class SageMakerConfigManager:
         """Get full S3 URI for different path types"""
         base_paths = {
             'training_data': self.s3_config.training_data_path,
+            'processed_data': self.s3_config.processed_data_path,
             'models': self.s3_config.model_artifacts_path,
             'checkpoints': self.s3_config.checkpoints_path,
+            'logs': self.s3_config.logs_path,
             'batch_input': self.s3_config.batch_input_path,
             'batch_output': self.s3_config.batch_output_path,
             'data_capture': self.s3_config.data_capture_path,

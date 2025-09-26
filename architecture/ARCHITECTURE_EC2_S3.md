@@ -1,3 +1,282 @@
+# Stranger Things AI Analysis Suite - EC2/S3 Architecture
+
+Detailed architecture documentation for the EC2/S3 deployment strategy.
+
+## Overview
+
+This architecture uses AWS EC2 for compute resources and S3 for model storage, providing a scalable and cost-effective solution for training and deploying AI models.
+
+## Architecture Diagram
+
+```
+                           AWS Cloud
+    ┌───────────────────────────────────────────────────────────────────┐
+    │                                                                   │
+    │    ┌─────────────────────┐      ┌─────────────────────┐    │
+    │    │   Training Instances   │      │   Hosting Instance    │    │
+    │    │    (g4dn.xlarge)     │      │    (t3.medium)      │    │
+    │    │                     │      │                     │    │
+    │    │  - LLaMA Training    │      │  - Gradio App        │    │
+    │    │  - Qwen Training     │      │  - Model Loading     │    │
+    │    │  - Data Processing   │      │  - User Interface    │    │
+    │    └─────────────────────┘      └─────────────────────┘    │
+    │                │                            │                 │
+    │                │                            │                 │
+    │                │           S3 Storage         │                 │
+    │                │    ┌─────────────────────┐    │                 │
+    │                └────│  - Trained Models   │────┘                 │
+    │                     │  - Training Data    │                      │
+    │                     │  - Model Metadata   │                      │
+    │                     │  - Results & Logs   │                      │
+    │                     └─────────────────────┘                      │
+    │                                                                   │
+    └───────────────────────────────────────────────────────────────────┘
+                                      │
+                                      │
+                     External Services
+                ┌──────────────────────────────────┐
+                │     HuggingFace Hub           │
+                │   (Fallback Models)          │
+                │                               │
+                │  - LLaMA Fallback Model      │
+                │  - Qwen Fallback Model       │
+                └──────────────────────────────────┘
+```
+
+## Components
+
+### EC2 Training Instances
+- **Instance Type**: g4dn.xlarge (GPU-enabled)
+- **Purpose**: Model training and fine-tuning
+- **Features**:
+  - NVIDIA T4 GPU for accelerated training
+  - 16 GB RAM
+  - High-bandwidth network
+  - Spot instance support for cost optimization
+
+### EC2 Hosting Instance
+- **Instance Type**: t3.medium (CPU-only)
+- **Purpose**: Gradio application hosting
+- **Features**:
+  - 4 GB RAM
+  - Moderate CPU performance
+  - Cost-effective for web hosting
+  - Auto-scaling potential
+
+### S3 Storage
+- **Purpose**: Centralized model and data storage
+- **Structure**:
+  ```
+  stranger-things-nlp-bucket/
+  ├── models/
+  │   └── trained/
+  │       ├── llama/
+  │       │   ├── latest.json
+  │       │   └── 20241224-143022/
+  │       └── qwen/
+  │           ├── latest.json
+  │           └── 20241224-150045/
+  ├── checkpoints/
+  │   ├── llama/
+  │   └── qwen/
+  ├── data/
+  │   ├── training/
+  │   │   └── transcripts/
+  │   └── processed/
+  └── logs/
+  ```
+
+## Deployment Workflow
+
+### 1. Infrastructure Setup
+```bash
+# Initialize AWS resources
+python deploy_aws.py init
+
+# This creates:
+# - S3 bucket with proper structure
+# - Security groups
+# - IAM roles (if needed)
+# - Key pair verification
+```
+
+### 2. Data Upload
+```bash
+# Upload training data
+python deploy_aws.py upload-data
+
+# Uploads:
+# - Transcript CSV files
+# - Configuration files
+# - Supporting data
+```
+
+### 3. Model Training
+```bash
+# Launch training instances
+python deploy_aws.py train llama
+python deploy_aws.py train qwen
+
+# Process:
+# 1. Launch g4dn.xlarge instance
+# 2. Deploy code and dependencies
+# 3. Start training pipeline
+# 4. Upload results to S3
+# 5. Terminate instance
+```
+
+### 4. Application Deployment
+```bash
+# Deploy Gradio application
+python deploy_aws.py deploy-gradio
+
+# Process:
+# 1. Launch t3.medium instance
+# 2. Deploy application code
+# 3. Start Gradio server
+# 4. Configure model loading
+```
+
+## Data Flow
+
+### Training Phase
+1. **Data Ingestion**: Transcript files uploaded to S3
+2. **Instance Launch**: Training instance started with GPU support
+3. **Code Deployment**: Training pipeline deployed to instance
+4. **Data Download**: Training data downloaded from S3
+5. **Model Training**: Fine-tuning process executed
+6. **Result Upload**: Trained models uploaded to S3
+7. **Cleanup**: Training instance terminated
+
+### Inference Phase
+1. **App Launch**: Gradio app starts on hosting instance
+2. **Model Check**: App checks S3 for trained models
+3. **Model Download**: Models cached locally if available
+4. **Fallback Decision**: Falls back to HuggingFace if needed
+5. **User Interaction**: Web interface serves user requests
+6. **Model Inference**: Responses generated using loaded models
+
+## Security
+
+### Network Security
+- **Security Groups**: Restricted port access (22, 7860, 80, 443)
+- **VPC Configuration**: Default VPC with public subnets
+- **Key Pair Authentication**: SSH access via key pairs only
+
+### IAM Roles and Policies
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::stranger-things-nlp-bucket",
+        "arn:aws:s3:::stranger-things-nlp-bucket/*"
+      ]
+    }
+  ]
+}
+```
+
+### Data Protection
+- **Encryption at Rest**: S3 server-side encryption
+- **Encryption in Transit**: HTTPS for all data transfers
+- **Access Control**: IAM policies for resource access
+- **Secrets Management**: Environment variables for tokens
+
+## Cost Optimization
+
+### Instance Management
+- **Spot Instances**: Up to 70% savings for training workloads
+- **Auto-Termination**: Instances terminate after job completion
+- **Right-Sizing**: Appropriate instance types for each workload
+- **Scheduling**: Training during off-peak hours
+
+### Storage Optimization
+- **S3 Intelligent Tiering**: Automatic cost optimization
+- **Lifecycle Policies**: Automatic cleanup of old models
+- **Compression**: Model files compressed when possible
+- **Monitoring**: Cost tracking and alerts
+
+## Monitoring and Logging
+
+### Instance Monitoring
+- **CloudWatch Metrics**: CPU, memory, network utilization
+- **Custom Metrics**: Training progress, model accuracy
+- **Log Aggregation**: Centralized logging via CloudWatch Logs
+- **Alerting**: Notifications for failures or completion
+
+### Application Monitoring
+- **Health Checks**: Automated service health monitoring
+- **Performance Metrics**: Response times, error rates
+- **User Analytics**: Usage patterns and feature adoption
+- **Model Performance**: Inference latency and accuracy
+
+## Disaster Recovery
+
+### Backup Strategy
+- **Model Versioning**: Multiple model versions in S3
+- **Code Versioning**: Git-based version control
+- **Configuration Backup**: Infrastructure as code
+- **Data Backup**: Training data replicated across regions
+
+### Recovery Procedures
+- **Instance Replacement**: Automated instance recreation
+- **Data Recovery**: Point-in-time recovery from S3
+- **Rollback Capability**: Previous model version deployment
+- **Service Restoration**: Automated service restoration
+
+## Scaling Considerations
+
+### Horizontal Scaling
+- **Multiple Training Instances**: Parallel model training
+- **Load Balancing**: Multiple Gradio instances behind ALB
+- **Auto Scaling Groups**: Automatic capacity adjustment
+- **Regional Deployment**: Multi-region deployment capability
+
+### Vertical Scaling
+- **Instance Upgrades**: Larger instance types for heavy workloads
+- **Storage Scaling**: Elastic storage capacity
+- **Network Optimization**: Enhanced networking for large models
+- **GPU Scaling**: Multiple GPU instances for large models
+
+## Performance Optimization
+
+### Training Performance
+- **GPU Utilization**: Optimized batch sizes and memory usage
+- **Data Loading**: Efficient data pipeline with prefetching
+- **Model Checkpointing**: Regular checkpoints for long training
+- **Mixed Precision**: FP16 training for speed and memory efficiency
+
+### Inference Performance
+- **Model Caching**: Local model caching for faster loading
+- **Response Caching**: Cache common responses
+- **Connection Pooling**: Efficient network connection management
+- **Model Optimization**: Quantization and optimization techniques
+
+## Future Enhancements
+
+### Planned Improvements
+- **Container Deployment**: Docker containerization for better portability
+- **Kubernetes Integration**: Container orchestration for scalability
+- **CI/CD Pipeline**: Automated deployment and testing
+- **A/B Testing**: Model comparison and evaluation framework
+
+### Advanced Features
+- **Real-time Training**: Continuous model updates
+- **Federated Learning**: Distributed training across instances
+- **Multi-Model Serving**: Dynamic model loading and switching
+- **Advanced Monitoring**: ML-specific monitoring and alerting
+
+This architecture provides a robust, scalable foundation for the Stranger Things AI Analysis Suite with clear separation of concerns and optimized resource utilization.
+
 # EC2/S3 Architecture - Stranger Things NLP Project
 
 ## Architecture Overview
