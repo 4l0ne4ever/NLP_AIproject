@@ -153,7 +153,7 @@ class ModelTrainingPipeline:
             model = CharacterChatbot(
                 self.base_model_name or "meta-llama/Llama-3.2-3B-Instruct",
                 data_path=transcripts_dir,
-                huggingface_token=os.getenv('huggingface_token')
+huggingface_token=os.getenv('HUGGINGFACE_TOKEN')
             )
         elif self.model_type == "qwen":
             # Extract transcripts directory from the training data path  
@@ -166,7 +166,7 @@ class ModelTrainingPipeline:
             model = CharacterChatbotQwen(
                 self.base_model_name or "Qwen/Qwen2.5-3B-Instruct",
                 data_path=transcripts_dir,
-                huggingface_token=os.getenv('huggingface_token')
+huggingface_token=os.getenv('HUGGINGFACE_TOKEN')
             )
         else:
             raise ValueError(f"Unsupported model type: {self.model_type}")

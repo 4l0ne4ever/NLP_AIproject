@@ -13,9 +13,15 @@ import transformers
 class CharacterChatbotQwen():
     def __init__(self,
                  model_path,
-                 data_path="/content/data/transcripts/",
+                 data_path=None,
                  huggingface_token=None):
         self.model_path = model_path
+        
+        # Set default data_path if not provided
+        if data_path is None:
+            current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            data_path = os.path.join(current_dir, "data", "transcripts")
+        
         data_path = os.path.abspath(data_path.rstrip('/')) + '/'
         if not os.path.isdir(data_path):
             raise ValueError(f"Data directory does not exist: {data_path}")
@@ -30,26 +36,34 @@ class CharacterChatbotQwen():
         if self.huggingface_token is not None:
             huggingface_hub.login(self.huggingface_token)
             
-        # Only load model if repo exists; do not auto-train in __init__
-        if huggingface_hub.repo_exists(self.model_path):
+        # Load model if it's a local directory or HuggingFace repo
+        if os.path.isdir(self.model_path) or huggingface_hub.repo_exists(self.model_path):
+            print(f"Loading model from: {self.model_path}")
             self.model = self.load_model(self.model_path)
         else:
             print(f"Model {self.model_path} not found. Ready to train a new model when train() is called.")
             self.model = None
             
     def load_model(self, model_path):
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16
-        )
+        # Only use quantization if CUDA is available
+        model_kwargs = {"torch_dtype": torch.float16 if torch.cuda.is_available() else torch.float32}
+        
+        if torch.cuda.is_available():
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16
+            )
+            model_kwargs["quantization_config"] = bnb_config
+            print("Loading model with CUDA quantization")
+        else:
+            print("Loading model on CPU (no quantization)")
+        
         pipeline = transformers.pipeline(
             "text-generation",
             model=model_path,
-            model_kwargs={
-                "torch_dtype": torch.float16,
-                "quantization_config": bnb_config,
-            },
+            model_kwargs=model_kwargs,
+            device_map="auto" if torch.cuda.is_available() else None,
         )
         return pipeline
             

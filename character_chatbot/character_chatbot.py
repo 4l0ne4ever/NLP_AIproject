@@ -10,7 +10,7 @@ import huggingface_hub
 import pandas as pd
 from datasets import Dataset
 from transformers import BitsAndBytesConfig, AutoModelForCausalLM, AutoTokenizer, TrainingArguments, TrainerCallback
-from peft import LoraConfig, PeftModel
+from peft import LoraConfig, PeftModel, PeftConfig
 from trl import SFTConfig, SFTTrainer
 import transformers
 
@@ -72,10 +72,16 @@ class S3CheckpointCallback(TrainerCallback):
 class CharacterChatbot():
     def __init__(self,
                 model_path,
-                data_path = "/content/data/transcripts/",
+                data_path=None,
                 huggingface_token=None,
                 ):
         self.model_path = model_path
+        
+        # Set default data_path if not provided
+        if data_path is None:
+            current_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            data_path = os.path.join(current_dir, "data", "transcripts")
+        
         data_path = os.path.abspath(data_path.rstrip('/')) + '/'
         if not os.path.isdir(data_path):
             raise ValueError(f"Data directory does not exist: {data_path}")
@@ -94,27 +100,97 @@ class CharacterChatbot():
         if self.huggingface_token is not None:
             huggingface_hub.login(self.huggingface_token)
             
-        # Only load model if the repo exists; do not auto-train in __init__
-        if huggingface_hub.repo_exists(self.model_path):
+        # Load model if it's a local directory or HuggingFace repo
+        if os.path.isdir(self.model_path) or huggingface_hub.repo_exists(self.model_path):
+            print(f"Loading model from: {self.model_path}")
             self.model = self.load_model(self.model_path)
         else:
             print(f"Model {self.model_path} not found. Ready to train a new model when train() is called.")
             self.model = None
             
     def load_model(self, model_path):
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit= True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16
-        )
+        # Try different loading strategies
+        try:
+            # First try: Load as direct model
+            return self._load_direct_model(model_path)
+        except Exception as e:
+            print(f"Direct model loading failed: {e}")
+            
+            # Second try: Load as LoRA adapter if checkpoints exist
+            checkpoint_dirs = [d for d in os.listdir(model_path) if d.startswith('checkpoint-') and os.path.isdir(os.path.join(model_path, d))]
+            if checkpoint_dirs:
+                latest_checkpoint = max(checkpoint_dirs, key=lambda x: int(x.split('-')[1]))
+                checkpoint_path = os.path.join(model_path, latest_checkpoint)
+                print(f"Trying to load LoRA checkpoint: {checkpoint_path}")
+                return self._load_lora_model(checkpoint_path)
+            
+            # If all fails, re-raise the original error
+            raise e
+    
+    def _load_direct_model(self, model_path):
+        """Load model directly from path"""
+        model_kwargs = {"torch_dtype": torch.float16 if torch.cuda.is_available() else torch.float32}
+        
+        if torch.cuda.is_available():
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16
+            )
+            model_kwargs["quantization_config"] = bnb_config
+            print("Loading model with CUDA quantization")
+        else:
+            print("Loading model on CPU (no quantization)")
+        
         pipeline = transformers.pipeline(
             "text-generation",
             model=model_path,
-            model_kwargs={
-                "torch_dtype": torch.float16,
-                "quantization_config": bnb_config,
-            },
+            model_kwargs=model_kwargs,
+            device_map="auto" if torch.cuda.is_available() else None,
         )
+        return pipeline
+    
+    def _load_lora_model(self, checkpoint_path):
+        """Load model using LoRA adapter"""
+        from peft import PeftModel, PeftConfig
+        
+        print("Loading LoRA adapter model")
+        
+        # Load PEFT config
+        peft_config = PeftConfig.from_pretrained(checkpoint_path)
+        base_model_name = peft_config.base_model_name_or_path
+        
+        print(f"Base model: {base_model_name}")
+        
+        # Load base model
+        model_kwargs = {"torch_dtype": torch.float16 if torch.cuda.is_available() else torch.float32}
+        
+        if torch.cuda.is_available():
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.float16
+            )
+            model_kwargs["quantization_config"] = bnb_config
+            model_kwargs["device_map"] = "auto"
+        
+        base_model = AutoModelForCausalLM.from_pretrained(
+            base_model_name,
+            **model_kwargs
+        )
+        
+        # Load and apply LoRA adapter
+        model = PeftModel.from_pretrained(base_model, checkpoint_path)
+        tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
+        
+        # Create pipeline
+        pipeline = transformers.pipeline(
+            "text-generation",
+            model=model,
+            tokenizer=tokenizer,
+            device_map="auto" if torch.cuda.is_available() else None,
+        )
+        
         return pipeline
             
     def load_data(self):

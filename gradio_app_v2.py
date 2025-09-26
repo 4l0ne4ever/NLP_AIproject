@@ -36,13 +36,41 @@ class S3ModelManager:
             print(f"Error getting latest model info for {model_type}: {e}")
             return None
     
-    def download_model(self, model_path, local_path):
-        """Download model from S3 to local cache"""
+    def download_model(self, model_s3_prefix, local_dir):
+        """Download model directory from S3 to local cache"""
         try:
-            if not os.path.exists(local_path):
-                os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                self.s3_client.download_file(self.bucket_name, model_path, local_path)
-            return local_path
+            os.makedirs(local_dir, exist_ok=True)
+            
+            # List all files in the S3 model directory
+            paginator = self.s3_client.get_paginator('list_objects_v2')
+            pages = paginator.paginate(Bucket=self.bucket_name, Prefix=model_s3_prefix)
+            
+            downloaded_files = 0
+            for page in pages:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        s3_key = obj['Key']
+                        if s3_key.endswith('/'):  # Skip directory entries
+                            continue
+                            
+                        # Calculate local file path
+                        rel_path = s3_key[len(model_s3_prefix):]
+                        local_file_path = os.path.join(local_dir, rel_path)
+                        
+                        # Create local directory if needed
+                        os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+                        
+                        # Download file if it doesn't exist
+                        if not os.path.exists(local_file_path):
+                            self.s3_client.download_file(self.bucket_name, s3_key, local_file_path)
+                            downloaded_files += 1
+            
+            if downloaded_files > 0:
+                print(f"Downloaded {downloaded_files} model files to {local_dir}")
+            else:
+                print(f"Model already cached at {local_dir}")
+                
+            return local_dir
         except Exception as e:
             print(f"Error downloading model: {e}")
             return None
@@ -51,11 +79,16 @@ class S3ModelManager:
         """Get local path for the latest model"""
         model_info = self.get_latest_model_info(model_type)
         if model_info:
-            model_s3_path = model_info.get('model_path')
-            if model_s3_path:
-                local_path = os.path.join(self.local_model_cache, model_type, 
-                                        model_info.get('timestamp', 'latest'))
-                return self.download_model(model_s3_path, local_path)
+            model_s3_prefix = model_info.get('model_path')
+            if model_s3_prefix:
+                local_dir = os.path.join(self.local_model_cache, model_type, 
+                                       model_info.get('timestamp', 'latest'))
+                downloaded_path = self.download_model(model_s3_prefix, local_dir)
+                if downloaded_path and os.path.exists(downloaded_path):
+                    print(f" Model {model_type} ready at: {downloaded_path}")
+                    return downloaded_path
+                else:
+                    print(f" Failed to download {model_type} model")
         return None
 
 # Initialize S3 Model Manager
@@ -85,12 +118,17 @@ def initialize_chatbot_models():
     """Initialize chatbot models from S3 or fallback to HuggingFace"""
     global character_chatbot_llama, character_chatbot_qwen
     
+    # Get the correct local data path
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    data_path = os.path.join(current_dir, "data", "transcripts")
+    
     # Try to load LLama model from S3
     llama_model_path = s3_manager.get_model_path("llama")
     if llama_model_path:
         print(f"Loading LLama model from S3: {llama_model_path}")
         character_chatbot_llama = CharacterChatbot(
             llama_model_path,
+            data_path=data_path,
             huggingface_token=os.getenv('huggingface_token'),
         )
     else:
@@ -98,6 +136,7 @@ def initialize_chatbot_models():
         announce_fallback("llama")
         character_chatbot_llama = CharacterChatbot(
             FALLBACK_MODELS["llama"],
+            data_path=data_path,
             huggingface_token=os.getenv('huggingface_token'),
         )
     
@@ -107,6 +146,7 @@ def initialize_chatbot_models():
         print(f"Loading Qwen model from S3: {qwen_model_path}")
         character_chatbot_qwen = CharacterChatbotQwen(
             qwen_model_path,
+            data_path=data_path,
             huggingface_token=os.getenv('huggingface_token'),
         )
     else:
@@ -114,6 +154,7 @@ def initialize_chatbot_models():
         announce_fallback("qwen")
         character_chatbot_qwen = CharacterChatbotQwen(
             FALLBACK_MODELS["qwen"],
+            data_path=data_path,
             huggingface_token=os.getenv('huggingface_token'),
         )
 
